@@ -30,47 +30,33 @@ interface Order {
 
 const mockOrders: Order[] = [
   {
-    id: '1',
-    orderNumber: 'ORD20241121001',
-    customerName: '김철수',
-    phone: '010-1234-5678',
-    address: '서울시 강남구 테헤란로 123',
+    id: 'test-staff-order-001',
+    orderNumber: 'TEST-STAFF-ORDER-999-001',
+    customerName: '[테스트] 가상고객 A',
+    phone: '000-0000-0000',
+    address: '[테스트] 가상주소 A',
     items: [
-      { name: '발렌타인 디너', quantity: 1, options: ['그랜드 스타일'] },
+      { name: '[테스트] 가상 메뉴 A', quantity: 1, options: ['테스트 옵션'] },
     ],
-    totalPrice: 80000,
+    totalPrice: 99999,
     status: 'pending',
-    orderTime: '14:30',
+    orderTime: '99:99',
     deliveryType: 'delivery',
   },
   {
-    id: '2',
-    orderNumber: 'ORD20241121002',
-    customerName: '이영희',
-    phone: '010-2345-6789',
-    address: '서울시 서초구 강남대로 456',
+    id: 'test-staff-order-002',
+    orderNumber: 'TEST-STAFF-ORDER-999-002',
+    customerName: '[테스트] 가상고객 B',
+    phone: '000-0000-0000',
+    address: '[테스트] 가상주소 B',
     items: [
-      { name: '프렌치 디너', quantity: 1, options: ['심플 스타일'] },
+      { name: '[테스트] 가상 메뉴 B', quantity: 1, options: ['테스트 옵션'] },
     ],
-    totalPrice: 70000,
+    totalPrice: 88888,
     status: 'preparing',
-    orderTime: '14:25',
+    orderTime: '99:99',
     deliveryType: 'delivery',
-  },
-  {
-    id: '3',
-    orderNumber: 'ORD20241121003',
-    customerName: '박민수',
-    phone: '010-3456-7890',
-    address: '매장 픽업',
-    items: [
-      { name: '잉글리시 디너', quantity: 1, options: ['디럭스 스타일'] },
-    ],
-    totalPrice: 60000,
-    status: 'delivering',
-    orderTime: '14:20',
-    deliveryType: 'pickup',
-  },
+  }
 ];
 
 const statusText = {

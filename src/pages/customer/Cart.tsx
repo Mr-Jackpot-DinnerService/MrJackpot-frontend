@@ -3,10 +3,34 @@ import { Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { useCart } from '../../contexts/CartContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
+import { useState, useEffect } from 'react';
+import { CartService, OrderService, type CartResponse } from '../../services';
+import { toast } from 'sonner';
 
 export default function Cart() {
   const navigate = useNavigate();
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
+  const [backendCart, setBackendCart] = useState<CartResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // 백엔드에서 장바구니 데이터 로드
+  useEffect(() => {
+    const loadCartData = async () => {
+      try {
+        setLoading(true);
+        const cartData = await CartService.getCart();
+        setBackendCart(cartData);
+        console.log('백엔드 장바구니 데이터:', cartData);
+      } catch (error) {
+        console.error('장바구니 데이터 로드 실패:', error);
+        // 로그인하지 않은 경우 등은 에러를 표시하지 않음
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCartData();
+  }, []);
 
   if (items.length === 0) {
     return (
@@ -82,11 +106,16 @@ export default function Cart() {
         </div>
         <div className="flex justify-between items-center mb-4">
           <span className="text-gray-600">배달비</span>
-          <span>3,000원</span>
+          <span>{backendCart ? backendCart.deliveryFee.toLocaleString() : '3,000'}원</span>
         </div>
         <div className="border-t pt-4 flex justify-between items-center text-xl">
           <span>총 결제 금액</span>
-          <span className="text-red-600">{(totalPrice + 3000).toLocaleString()}원</span>
+          <span className="text-red-600">
+            {backendCart ?
+              backendCart.finalPrice.toLocaleString() :
+              (totalPrice + 3000).toLocaleString()
+            }원
+          </span>
         </div>
       </div>
 
@@ -94,14 +123,43 @@ export default function Cart() {
         <Link to="/customer/menu" className="flex-1">
           <Button variant="outline" className="w-full">계속 쇼핑하기</Button>
         </Link>
-        <Button 
+        <Button
           className="flex-1 bg-red-600 hover:bg-red-700"
-          onClick={() => {
-            clearCart();
-            navigate('/customer/order-history');
+          onClick={async () => {
+            try {
+              if (items.length === 0 && (!backendCart || backendCart.items.length === 0)) {
+                toast.error('장바구니가 비어있습니다.');
+                return;
+              }
+
+              setLoading(true);
+
+              // 실제 주문 생성 API 호출
+              const orderId = await OrderService.placeOrder({
+                receiverName: '고객', // TODO: 실제 사용자 정보 사용
+                receiverPhone: '010-0000-0000',
+                address: '배달 주소',
+                paymentMethod: 'CARD',
+                deliveryType: 'IMMEDIATE'
+              });
+
+              console.log('주문 생성 완료, ID:', orderId);
+
+              // 로컬 장바구니도 비우기
+              await clearCart();
+
+              toast.success('주문이 완료되었습니다!');
+              navigate('/customer/order-history');
+            } catch (error) {
+              console.error('결제 실패:', error);
+              toast.error('결제에 실패했습니다. 다시 시도해주세요.');
+            } finally {
+              setLoading(false);
+            }
           }}
+          disabled={loading}
         >
-          결제하기
+          {loading ? '결제 중...' : '결제하기'}
         </Button>
       </div>
     </div>

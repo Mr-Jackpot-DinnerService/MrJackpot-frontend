@@ -25,15 +25,9 @@ interface InventoryItem {
 }
 
 const mockInventory: InventoryItem[] = [
-  { id: '1', name: '피자 도우 (라지)', category: '재료', quantity: 45, unit: '개', minQuantity: 20, lastUpdated: '2024-11-21 14:00' },
-  { id: '2', name: '모짜렐라 치즈', category: '재료', quantity: 8, unit: 'kg', minQuantity: 10, lastUpdated: '2024-11-21 13:30' },
-  { id: '3', name: '페퍼로니', category: '재료', quantity: 15, unit: 'kg', minQuantity: 5, lastUpdated: '2024-11-21 14:00' },
-  { id: '4', name: '토마토 소스', category: '재료', quantity: 25, unit: 'L', minQuantity: 10, lastUpdated: '2024-11-21 13:00' },
-  { id: '5', name: '피망', category: '채소', quantity: 3, unit: 'kg', minQuantity: 5, lastUpdated: '2024-11-21 12:00' },
-  { id: '6', name: '양파', category: '채소', quantity: 12, unit: 'kg', minQuantity: 5, lastUpdated: '2024-11-21 14:00' },
-  { id: '7', name: '버섯', category: '채소', quantity: 6, unit: 'kg', minQuantity: 3, lastUpdated: '2024-11-21 13:30' },
-  { id: '8', name: '콜라 1.25L', category: '음료', quantity: 48, unit: '병', minQuantity: 20, lastUpdated: '2024-11-21 14:00' },
-  { id: '9', name: '사이다 1.25L', category: '음료', quantity: 36, unit: '병', minQuantity: 20, lastUpdated: '2024-11-21 14:00' },
+  { id: 'test-inv-001', name: '[테스트] 가상 재료 A', category: '테스트', quantity: 999, unit: '개', minQuantity: 100, lastUpdated: '9999-99-99 99:99' },
+  { id: 'test-inv-002', name: '[테스트] 가상 재료 B', category: '테스트', quantity: 10, unit: 'kg', minQuantity: 50, lastUpdated: '9999-99-99 99:99' },
+  { id: 'test-inv-003', name: '[테스트] 가상 재료 C', category: '테스트', quantity: 5, unit: '병', minQuantity: 20, lastUpdated: '9999-99-99 99:99' },
 ];
 
 export default function InventoryList() {

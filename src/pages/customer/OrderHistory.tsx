@@ -20,35 +20,25 @@ interface Order {
 
 const mockOrders: Order[] = [
   {
-    id: '1',
-    orderNumber: 'ORD20241121001',
-    date: '2024-11-21 14:30',
+    id: 'test-order-001',
+    orderNumber: 'TEST-ORDER-999-001',
+    date: '9999-99-99 99:99',
     status: 'delivering',
     items: [
-      { name: '발렌타인 디너', quantity: 1, price: 80000, options: ['그랜드 스타일'] },
+      { name: '[테스트] 가상 메뉴 A', quantity: 1, price: 99999, options: ['테스트 옵션'] },
     ],
-    totalPrice: 80000,
+    totalPrice: 99999,
   },
   {
-    id: '2',
-    orderNumber: 'ORD20241120002',
-    date: '2024-11-20 18:45',
+    id: 'test-order-002',
+    orderNumber: 'TEST-ORDER-999-002',
+    date: '9999-99-99 99:99',
     status: 'completed',
     items: [
-      { name: '프렌치 디너', quantity: 1, price: 70000, options: ['심플 스타일'] },
+      { name: '[테스트] 가상 메뉴 B', quantity: 1, price: 88888, options: ['테스트 옵션'] },
     ],
-    totalPrice: 70000,
-  },
-  {
-    id: '3',
-    orderNumber: 'ORD20241119003',
-    date: '2024-11-19 12:20',
-    status: 'completed',
-    items: [
-      { name: '잉글리시 디너', quantity: 1, price: 60000, options: ['디럭스 스타일'] },
-    ],
-    totalPrice: 60000,
-  },
+    totalPrice: 88888,
+  }
 ];
 
 const statusText = {

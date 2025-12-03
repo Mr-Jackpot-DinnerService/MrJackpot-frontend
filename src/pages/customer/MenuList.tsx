@@ -7,14 +7,10 @@ import { useCart } from '../../contexts/CartContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { Textarea } from '../../components/ui/textarea';
 import { Plus, Minus } from 'lucide-react';
+import { MenuService, type MenuReference, type DinnerType } from '../../services';
+import { toast } from 'sonner';
 
-interface MenuComponent {
-  name: string;
-  defaultQuantity: number;
-  price: number; // 0 if included in base price, positive for extra cost
-  maxQuantity?: number;
-}
-
+// 로컬에서 사용할 MenuItem 인터페이스 (백엔드 DinnerType과 매핑)
 interface MenuItem {
   id: string;
   name: string;
@@ -23,70 +19,32 @@ interface MenuItem {
   image: string;
   category: string;
   options: string[];
-  components: MenuComponent[];
+  components: Array<{
+    name: string;
+    defaultQuantity: number;
+    price: number;
+    maxQuantity?: number;
+  }>;
 }
 
-const menuItems: MenuItem[] = [
-  {
-    id: '1',
-    name: '발렌타인 디너',
-    description: '하트 모양과 큐피드 장식 접시에 와인과 스테이크 제공',
-    price: 80000,
-    image: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=400&h=300&fit=crop',
+// 백엔드 DinnerType을 MenuItem으로 변환하는 함수
+const convertDinnerTypeToMenuItem = (dinnerType: DinnerType, servingStyles: string[]): MenuItem => {
+  return {
+    id: dinnerType.code,
+    name: dinnerType.description,
+    description: dinnerType.description,
+    price: dinnerType.price,
+    image: dinnerType.imageUrl || '/placeholder-menu-image.jpg',
     category: 'dinner',
-    options: ['심플 스타일', '그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '와인', defaultQuantity: 1, price: 15000 },
-      { name: '스테이크', defaultQuantity: 1, price: 35000 }
-    ]
-  },
-  {
-    id: '2',
-    name: '프렌치 디너',
-    description: '커피, 와인, 샐러드, 스테이크 제공',
-    price: 70000,
-    image: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['심플 스타일', '그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '커피', defaultQuantity: 1, price: 5000 },
-      { name: '와인', defaultQuantity: 1, price: 15000 },
-      { name: '샐러드', defaultQuantity: 1, price: 10000 },
-      { name: '스테이크', defaultQuantity: 1, price: 35000 }
-    ]
-  },
-  {
-    id: '3',
-    name: '잉글리시 디너',
-    description: '에그 스크램블, 베이컨, 빵, 스테이크 제공',
-    price: 60000,
-    image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['심플 스타일', '그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '에그 스크램블', defaultQuantity: 1, price: 8000 },
-      { name: '베이컨', defaultQuantity: 1, price: 7000 },
-      { name: '빵', defaultQuantity: 1, price: 5000 },
-      { name: '스테이크', defaultQuantity: 1, price: 35000 }
-    ]
-  },
-  {
-    id: '4',
-    name: '샴페인 축제 디너',
-    description: '2인 식사, 샴페인 1병, 바게트빵 4개, 커피 포트, 와인, 스테이크 제공',
-    price: 120000,
-    image: 'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '샴페인', defaultQuantity: 1, price: 40000 },
-      { name: '바게트빵', defaultQuantity: 4, price: 3000 },
-      { name: '커피 포트', defaultQuantity: 1, price: 10000 },
-      { name: '와인', defaultQuantity: 1, price: 15000 },
-      { name: '스테이크', defaultQuantity: 2, price: 35000 }
-    ]
-  },
-];
+    options: servingStyles,
+    components: dinnerType.recipe.map(comp => ({
+      name: comp.componentName,
+      defaultQuantity: comp.quantity,
+      price: 0, // 기본 레시피는 추가 요금 없음
+      maxQuantity: comp.quantity + 5 // 기본 수량 + 5개까지 추가 가능
+    }))
+  };
+};
 
 export default function MenuList() {
   const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
@@ -94,7 +52,41 @@ export default function MenuList() {
   const [quantity, setQuantity] = useState(1);
   const [request, setRequest] = useState('');
   const [componentQuantities, setComponentQuantities] = useState<Record<string, number>>({});
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
+  const [loading, setLoading] = useState(true);
   const { addToCart } = useCart();
+
+  // 메뉴 데이터 로드
+  useEffect(() => {
+    const loadMenuData = async () => {
+      try {
+        setLoading(true);
+        const menuRef = await MenuService.getMenuReferences();
+        setMenuReference(menuRef);
+
+        // 서빙 스타일 옵션 추출
+        const servingStyleOptions = menuRef.servingStyles.map(style => style.description);
+
+        // DinnerType을 MenuItem으로 변환
+        const convertedMenuItems = menuRef.dinnerTypes.map(dinnerType =>
+          convertDinnerTypeToMenuItem(dinnerType, servingStyleOptions)
+        );
+
+        setMenuItems(convertedMenuItems);
+      } catch (error) {
+        console.error('Failed to load menu data:', error);
+        toast.error('메뉴 데이터를 불러오는데 실패했습니다.');
+
+        // 실패시 빈 배열로 설정
+        setMenuItems([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMenuData();
+  }, []);
 
   useEffect(() => {
     if (selectedMenu) {
@@ -122,30 +114,55 @@ export default function MenuList() {
   };
 
   const calculateTotalPrice = () => {
-    if (!selectedMenu) return 0;
-    
+    if (!selectedMenu || !menuReference) return 0;
+
+    // 기본 디너 가격
     let total = selectedMenu.price;
-    
+
+    // 서빙 스타일 추가 요금
+    if (selectedOptions.length > 0) {
+      const selectedServingStyle = selectedOptions[0];
+      const servingStylePrice = MenuService.calculateServingStylePrice(
+        menuReference.servingStyles.find(s => s.description === selectedServingStyle)?.code || '',
+        menuReference
+      );
+      total += servingStylePrice;
+    }
+
+    // 재료 변경 추가 요금
+    const modifications: Record<string, number> = {};
     selectedMenu.components.forEach(comp => {
-      const currentQty = componentQuantities[comp.name] || 0;
+      const currentQty = componentQuantities[comp.name] || comp.defaultQuantity;
       const diff = currentQty - comp.defaultQuantity;
-      if (diff > 0) {
-        total += diff * comp.price;
+      if (diff !== 0) {
+        // 컴포넌트 코드 찾기
+        const componentType = menuReference.componentTypes.find(ct => ct.description === comp.name);
+        if (componentType) {
+          modifications[componentType.code] = diff;
+        }
       }
-      // Optional: Subtract price if removing items (if business logic allows)
-      // Currently only adding cost for extra items
     });
+
+    const modificationPrice = MenuService.calculateComponentModificationPrice(modifications, menuReference);
+    total += modificationPrice;
 
     return total * quantity;
   };
 
   const handleAddToCart = () => {
-    if (selectedMenu) {
-      // Construct detailed request string from component changes
+    if (selectedMenu && menuReference) {
+      // 구성 변경 내용 정리
+      const modifications: Record<string, number> = {};
       const changes: string[] = [];
+
       selectedMenu.components.forEach(comp => {
-        const currentQty = componentQuantities[comp.name] || 0;
-        if (currentQty !== comp.defaultQuantity) {
+        const currentQty = componentQuantities[comp.name] || comp.defaultQuantity;
+        const diff = currentQty - comp.defaultQuantity;
+        if (diff !== 0) {
+          const componentType = menuReference.componentTypes.find(ct => ct.description === comp.name);
+          if (componentType) {
+            modifications[componentType.code] = diff;
+          }
           changes.push(`${comp.name}: ${currentQty}개 (기본 ${comp.defaultQuantity}개)`);
         }
       });
@@ -153,33 +170,61 @@ export default function MenuList() {
       const changesText = changes.length > 0 ? `[구성 변경] ${changes.join(', ')}` : '';
       const fullRequest = [changesText, request].filter(Boolean).join('\n');
 
+      // 서빙 스타일 코드 찾기
+      const servingStyleCode = selectedOptions.length > 0 ?
+        menuReference.servingStyles.find(s => s.description === selectedOptions[0])?.code || '' :
+        menuReference.servingStyles[0]?.code || '';
+
       addToCart({
         menuId: selectedMenu.id,
         name: selectedMenu.name,
-        price: calculateTotalPrice() / quantity, // Unit price with adjustments
+        price: calculateTotalPrice() / quantity,
         quantity,
         options: selectedOptions,
         image: selectedMenu.image,
         request: fullRequest.trim() || undefined,
+        // API 연결을 위한 추가 정보
+        dinnerType: selectedMenu.id,
+        servingStyle: servingStyleCode,
+        componentModifications: modifications,
       });
+
+      toast.success('장바구니에 추가되었습니다.');
       setSelectedMenu(null);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <h1 className="text-3xl mb-8">메뉴</h1>
+        <div className="flex justify-center items-center h-64">
+          <div className="text-gray-600">메뉴를 불러오는 중...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <h1 className="text-3xl mb-8">메뉴</h1>
 
-      <div className="space-y-8">
-        <div>
-          <h2 className="text-2xl mb-4">디너 세트</h2>
-          <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {menuItems.map(item => (
-              <MenuCard key={item.id} item={item} onClick={() => handleMenuClick(item)} />
-            ))}
+      {menuItems.length === 0 ? (
+        <div className="flex justify-center items-center h-64">
+          <div className="text-gray-600">등록된 메뉴가 없습니다.</div>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          <div>
+            <h2 className="text-2xl mb-4">디너 세트</h2>
+            <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {menuItems.map(item => (
+                <MenuCard key={item.id} item={item} onClick={() => handleMenuClick(item)} />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Menu Detail Dialog */}
       <Dialog open={!!selectedMenu} onOpenChange={() => setSelectedMenu(null)}>

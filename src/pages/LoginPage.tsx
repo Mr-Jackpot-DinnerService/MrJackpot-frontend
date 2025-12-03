@@ -1,32 +1,47 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { useAuth } from '../contexts/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { toast } from 'sonner';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const [localLoading, setLocalLoading] = useState(false);
+  const { login, user, loading } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogin = async (e: React.FormEvent, role: 'customer' | 'staff') => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await login(email, password, role);
-      if (role === 'customer') {
+  // 이미 로그인된 사용자는 대시보드로 리다이렉트
+  React.useEffect(() => {
+    if (user && !loading) {
+      if (user.role === 'CUSTOMER') {
         navigate('/');
-      } else {
+      } else if (user.role === 'STAFF') {
         navigate('/staff/orders');
       }
-    } catch (error) {
+    }
+  }, [user, loading, navigate]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username.trim() || !password.trim()) {
+      toast.error('아이디와 비밀번호를 입력해주세요.');
+      return;
+    }
+
+    setLocalLoading(true);
+    try {
+      await login(username, password);
+      toast.success('로그인이 완료되었습니다.');
+      // 네비게이션은 useEffect에서 처리
+    } catch (error: any) {
       console.error('Login failed:', error);
+      toast.error(error.message || '로그인에 실패했습니다. 아이디와 비밀번호를 확인해주세요.');
     } finally {
-      setLoading(false);
+      setLocalLoading(false);
     }
   };
 
@@ -41,82 +56,47 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white rounded-lg shadow-md p-8">
-          <Tabs defaultValue="customer">
-            <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="customer">고객 로그인</TabsTrigger>
-              <TabsTrigger value="staff">직원 로그인</TabsTrigger>
-            </TabsList>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-center">로그인</h2>
+              <p className="text-sm text-gray-600 text-center mt-2">고객 및 직원 모두 사용 가능</p>
+            </div>
+            <div>
+              <Label htmlFor="username">사용자 아이디</Label>
+              <Input
+                id="username"
+                type="text"
+                placeholder="아이디를 입력해주세요"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                disabled={loading || localLoading}
+              />
+            </div>
 
-            <TabsContent value="customer">
-              <form onSubmit={(e) => handleLogin(e, 'customer')} className="space-y-4">
-                <div>
-                  <Label htmlFor="customer-email">이메일</Label>
-                  <Input
-                    id="customer-email"
-                    type="email"
-                    placeholder="example@email.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
+            <div>
+              <Label htmlFor="password">비밀번호</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={loading || localLoading}
+              />
+            </div>
 
-                <div>
-                  <Label htmlFor="customer-password">비밀번호</Label>
-                  <Input
-                    id="customer-password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
+            <Button type="submit" className="w-full bg-red-600 hover:bg-red-700" disabled={loading || localLoading}>
+              {loading || localLoading ? '로그인 중...' : '로그인'}
+            </Button>
 
-                <Button type="submit" className="w-full bg-red-600 hover:bg-red-700" disabled={loading}>
-                  {loading ? '로그인 중...' : '로그인'}
-                </Button>
-
-                <div className="text-center">
-                  <Link to="/signup" className="text-sm text-red-600 hover:underline">
-                    회원가입
-                  </Link>
-                </div>
-              </form>
-            </TabsContent>
-
-            <TabsContent value="staff">
-              <form onSubmit={(e) => handleLogin(e, 'staff')} className="space-y-4">
-                <div>
-                  <Label htmlFor="staff-email">직원 이메일</Label>
-                  <Input
-                    id="staff-email"
-                    type="email"
-                    placeholder="staff@mrdaebak.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="staff-password">비밀번호</Label>
-                  <Input
-                    id="staff-password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <Button type="submit" className="w-full bg-red-600 hover:bg-red-700" disabled={loading}>
-                  {loading ? '로그인 중...' : '직원 로그인'}
-                </Button>
-              </form>
-            </TabsContent>
-          </Tabs>
+            <div className="text-center">
+              <Link to="/signup" className="text-sm text-red-600 hover:underline">
+                회원가입
+              </Link>
+            </div>
+          </form>
         </div>
       </div>
     </div>

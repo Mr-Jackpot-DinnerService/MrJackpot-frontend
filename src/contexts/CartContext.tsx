@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
+import { CartService, type CartItemRequest } from '../services';
 
 export interface CartItem {
   id: string;
@@ -9,6 +10,10 @@ export interface CartItem {
   options: string[];
   image: string;
   request?: string;
+  // API 연결을 위한 추가 필드
+  dinnerType?: string;
+  servingStyle?: string;
+  componentModifications?: Record<string, number>;
 }
 
 interface CartContextType {
@@ -25,12 +30,35 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
 
-  const addToCart = (item: Omit<CartItem, 'id'>) => {
-    const newItem: CartItem = {
-      ...item,
-      id: Date.now().toString(),
-    };
-    setItems(prev => [...prev, newItem]);
+  const addToCart = async (item: Omit<CartItem, 'id'>) => {
+    try {
+      // 백엔드 API에 장바구니 아이템 추가
+      if (item.dinnerType && item.servingStyle) {
+        const cartRequest: CartItemRequest = {
+          dinnerType: item.dinnerType,
+          servingStyle: item.servingStyle,
+          quantity: item.quantity,
+          componentModifications: item.componentModifications,
+        };
+
+        await CartService.addToCart(cartRequest);
+      }
+
+      // 로컬 상태도 업데이트
+      const newItem: CartItem = {
+        ...item,
+        id: Date.now().toString(),
+      };
+      setItems(prev => [...prev, newItem]);
+    } catch (error) {
+      console.error('Failed to add item to cart:', error);
+      // 에러가 발생해도 로컬에는 추가 (오프라인 모드 지원)
+      const newItem: CartItem = {
+        ...item,
+        id: Date.now().toString(),
+      };
+      setItems(prev => [...prev, newItem]);
+    }
   };
 
   const removeFromCart = (id: string) => {
@@ -47,8 +75,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const clearCart = () => {
-    setItems([]);
+  const clearCart = async () => {
+    try {
+      // 백엔드 API에서 장바구니 비우기
+      await CartService.clearCart();
+    } catch (error) {
+      console.error('Failed to clear cart on backend:', error);
+      // 에러가 발생해도 로컬은 비우기
+    } finally {
+      setItems([]);
+    }
   };
 
   const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);

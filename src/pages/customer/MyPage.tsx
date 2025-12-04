@@ -19,7 +19,7 @@ export default function MyPage() {
             </div>
             <div>
               <h2 className="text-xl">{user.name}</h2>
-              <p className="text-gray-600">{user.email}</p>
+              <p className="text-gray-600">{user.email || '등록된 이메일이 없습니다'}</p>
             </div>
           </div>
 
@@ -27,7 +27,7 @@ export default function MyPage() {
             <div className="grid md:grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-gray-600 mb-1">전화번호</p>
-                <p>{user.phone}</p>
+                <p>{user.phone || '등록된 전화번호가 없습니다'}</p>
               </div>
               <div>
                 <p className="text-gray-600 mb-1">주소</p>

@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
-import { CartService, type CartItemRequest } from '../services';
+import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { CartService, type CartItemRequest, type CartResponse, type BackendCartItem } from '../services';
+import { useAuth } from './AuthContext';
 
 export interface CartItem {
   id: string;
@@ -18,10 +19,10 @@ export interface CartItem {
 
 interface CartContextType {
   items: CartItem[];
-  addToCart: (item: Omit<CartItem, 'id'>) => void;
+  addToCart: (item: Omit<CartItem, 'id'>) => Promise<void>;
   removeFromCart: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
-  clearCart: () => void;
+  clearCart: () => Promise<void>;
   totalPrice: number;
 }
 
@@ -29,6 +30,52 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
+  const { user } = useAuth();
+
+  // 로그인된 사용자의 장바구니 데이터 로드
+  useEffect(() => {
+    const loadCart = async () => {
+      if (!user || user.role !== 'CUSTOMER') {
+        console.log('사용자가 없거나 고객이 아님, 장바구니 비움');
+        setItems([]);
+        return;
+      }
+
+      try {
+        console.log('장바구니 로드 시도 중...', user.username);
+        const cartResponse = await CartService.getCart();
+        console.log('장바구니 로드 성공:', cartResponse);
+
+        // 백엔드 CartResponse를 프론트엔드 CartItem 형태로 변환
+        const convertedItems: CartItem[] = cartResponse.items.map(item => ({
+          id: item.cartMenuId?.toString() || Date.now().toString(),
+          menuId: item.dinnerType.code,
+          name: item.dinnerType.description,
+          price: Math.round(item.pricePerUnit / 100) * 100, // 단위 가격 반올림
+          quantity: item.quantity,
+          options: [item.servingStyle.description],
+          image: item.dinnerType.imageUrl || '/placeholder-menu-image.jpg',
+          request: undefined, // 백엔드에서 지원하지 않음
+          dinnerType: item.dinnerType.code,
+          servingStyle: item.servingStyle.code,
+          componentModifications: item.components?.reduce((acc, comp) => {
+            acc[comp.componentCode] = comp.quantity;
+            return acc;
+          }, {} as Record<string, number>) || {}
+        }));
+
+        console.log('변환된 장바구니 아이템:', convertedItems);
+        setItems(convertedItems);
+      } catch (error) {
+        console.error('Failed to load cart:', error);
+        console.log('장바구니가 비어있거나 에러 발생, 빈 장바구니로 설정');
+        // 에러 발생시(빈 장바구니 포함) 빈 배열로 설정
+        setItems([]);
+      }
+    };
+
+    loadCart();
+  }, [user]);
 
   const addToCart = async (item: Omit<CartItem, 'id'>) => {
     try {
@@ -38,18 +85,38 @@ export function CartProvider({ children }: { children: ReactNode }) {
           dinnerType: item.dinnerType,
           servingStyle: item.servingStyle,
           quantity: item.quantity,
-          componentModifications: item.componentModifications,
+          componentModifications: item.componentModifications
         };
 
+        console.log('장바구니 추가 요청:', cartRequest);
+        console.log('컴포넌트 수정사항:', cartRequest.componentModifications);
         await CartService.addToCart(cartRequest);
-      }
+        console.log('장바구니 추가 성공');
 
-      // 로컬 상태도 업데이트
-      const newItem: CartItem = {
-        ...item,
-        id: Date.now().toString(),
-      };
-      setItems(prev => [...prev, newItem]);
+        // 성공 후 장바구니 다시 로드
+        console.log('장바구니 다시 로드 중...');
+        const cartResponse = await CartService.getCart();
+        console.log('장바구니 재로드 성공:', cartResponse);
+        const convertedItems: CartItem[] = cartResponse.items.map(backendItem => ({
+          id: backendItem.cartMenuId?.toString() || Date.now().toString(),
+          menuId: backendItem.dinnerType.code,
+          name: backendItem.dinnerType.description,
+          price: Math.round(backendItem.pricePerUnit / 100) * 100,
+          quantity: backendItem.quantity,
+          options: [backendItem.servingStyle.description],
+          image: backendItem.dinnerType.imageUrl || '/placeholder-menu-image.jpg',
+          request: undefined, // 백엔드에서 지원하지 않음
+          dinnerType: backendItem.dinnerType.code,
+          servingStyle: backendItem.servingStyle.code,
+          componentModifications: backendItem.components?.reduce((acc, comp) => {
+            acc[comp.componentCode] = comp.quantity;
+            return acc;
+          }, {} as Record<string, number>) || {}
+        }));
+        setItems(convertedItems);
+      } else {
+        throw new Error('필수 정보가 누락되었습니다.');
+      }
     } catch (error) {
       console.error('Failed to add item to cart:', error);
       // 에러가 발생해도 로컬에는 추가 (오프라인 모드 지원)

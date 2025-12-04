@@ -8,7 +8,7 @@ interface User {
   email: string;
   phone: string;
   address?: string;
-  role: 'CUSTOMER' | 'STAFF';
+  role: 'CUSTOMER' | 'KITCHEN_STAFF' | 'DELIVERY_STAFF';
 }
 
 interface AuthContextType {
@@ -25,6 +25,7 @@ interface AuthContextType {
   }) => Promise<void>;
   updateProfile: (data: Partial<User>) => void;
   loading: boolean;
+  redirectToDashboard: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,21 +36,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 페이지 로드 시 토큰 확인하여 로그인 상태 복원
   useEffect(() => {
-    const token = AuthService.getCurrentToken();
-    if (token) {
-      // TODO: 토큰이 유효한지 확인하는 API 호출 필요
-      // 현재는 토큰이 있으면 로그인된 것으로 간주
+    const initializeAuth = async () => {
+      const token = AuthService.getCurrentToken();
+      if (token) {
+        // 로컬 스토리지에서 사용자 정보 복원
+        const savedUser = localStorage.getItem('user');
+        if (savedUser) {
+          try {
+            const parsedUser = JSON.parse(savedUser);
+
+            // 토큰 유효성 간단 테스트: 메뉴 API 호출로 확인
+            try {
+              // 가벼운 API 호출로 토큰 유효성 확인
+              await fetch(`${import.meta.env.VITE_API_URL}/menus/references`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              setUser(parsedUser);
+            } catch (apiError) {
+              console.warn('토큰이 유효하지 않음 - 자동 로그아웃');
+              AuthService.logout();
+              localStorage.removeItem('user');
+            }
+          } catch (error) {
+            console.error('Failed to parse saved user:', error);
+            // 파싱 실패 시 토큰도 제거
+            AuthService.logout();
+          }
+        } else {
+          // 토큰은 있지만 사용자 정보가 없으면 로그아웃
+          AuthService.logout();
+        }
+      }
       setLoading(false);
-    } else {
-      setLoading(false);
-    }
+    };
+
+    initializeAuth();
   }, []);
 
   const login = async (username: string, password: string) => {
     try {
       setLoading(true);
       const response: AuthResponse = await AuthService.login({ username, password });
-      setUser(response.user);
+
+      // 백엔드 AuthResponse에서 모든 필요한 사용자 정보 제공
+      const userWithCompleteData = {
+        ...response.user,
+        email: response.user.email || '',
+        phone: response.user.phone || '',
+        address: response.user.address || ''
+      };
+
+      setUser(userWithCompleteData);
+
+      // 사용자 정보를 로컬 스토리지에 저장
+      localStorage.setItem('user', JSON.stringify(userWithCompleteData));
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -61,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     AuthService.logout();
     setUser(null);
+    // 로컬 스토리지에서 사용자 정보 제거
+    localStorage.removeItem('user');
   };
 
   const signup = async (data: {
@@ -75,6 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       const response: AuthResponse = await AuthService.signup(data);
       setUser(response.user);
+      // 사용자 정보를 로컬 스토리지에 저장
+      localStorage.setItem('user', JSON.stringify(response.user));
     } catch (error) {
       console.error('Signup failed:', error);
       throw error;
@@ -89,8 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const redirectToDashboard = () => {
+    // 이 함수는 LoginPage에서 사용할 함수
+    // 실제 리다이렉트는 LoginPage에서 처리
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, signup, updateProfile, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, signup, updateProfile, loading, redirectToDashboard }}>
       {children}
     </AuthContext.Provider>
   );

@@ -58,6 +58,9 @@ class HttpClient {
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
+      console.log(`API 요청 [${options.method || 'GET'}] ${endpoint} - 토큰 있음`);
+    } else {
+      console.log(`API 요청 [${options.method || 'GET'}] ${endpoint} - 토큰 없음`);
     }
 
     const config: RequestInit = {
@@ -70,6 +73,20 @@ class HttpClient {
 
       if (!response.ok) {
         const errorData = await response.text();
+
+        // 401 Unauthorized 에러 시 (토큰 만료 등) 자동 로그아웃
+        if (response.status === 401) {
+          console.warn('인증 실패 (401) - 자동 로그아웃 처리');
+          TokenManager.removeToken();
+          // 사용자 정보도 제거
+          localStorage.removeItem('user');
+
+          // 로그인 페이지로 리다이렉트 (현재 페이지가 로그인 페이지가 아닌 경우에만)
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login';
+          }
+        }
+
         throw new ApiError(
           `HTTP ${response.status}: ${response.statusText}`,
           response.status,

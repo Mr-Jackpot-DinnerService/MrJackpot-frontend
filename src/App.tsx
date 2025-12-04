@@ -18,6 +18,7 @@ import PaymentManagement from './pages/customer/PaymentManagement';
 import StaffDashboard from './pages/staff/Dashboard';
 import OrderList from './pages/staff/OrderList';
 import InventoryList from './pages/staff/InventoryList';
+import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
   return (
@@ -29,8 +30,15 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             
-            {/* Customer Routes */}
-            <Route path="/customer" element={<CustomerDashboard />}>
+            {/* Customer Routes - 고객만 접근 가능 */}
+            <Route
+              path="/customer"
+              element={
+                <ProtectedRoute allowedRoles={['CUSTOMER']} redirectTo="/login">
+                  <CustomerDashboard />
+                </ProtectedRoute>
+              }
+            >
               <Route index element={<Navigate to="/customer/menu" replace />} />
               <Route path="menu" element={<MenuList />} />
               <Route path="cart" element={<Cart />} />
@@ -44,11 +52,32 @@ export default function App() {
               <Route path="payment-management" element={<PaymentManagement />} />
             </Route>
 
-            {/* Staff Routes */}
-            <Route path="/staff" element={<StaffDashboard />}>
+            {/* Staff Routes - 직원만 접근 가능 */}
+            <Route
+              path="/staff"
+              element={
+                <ProtectedRoute allowedRoles={['KITCHEN_STAFF', 'DELIVERY_STAFF']} redirectTo="/login">
+                  <StaffDashboard />
+                </ProtectedRoute>
+              }
+            >
               <Route index element={<Navigate to="/staff/orders" replace />} />
-              <Route path="orders" element={<OrderList />} />
-              <Route path="inventory" element={<InventoryList />} />
+              <Route
+                path="orders"
+                element={
+                  <ProtectedRoute allowedRoles={['KITCHEN_STAFF', 'DELIVERY_STAFF']} redirectTo="/login">
+                    <OrderList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="inventory"
+                element={
+                  <ProtectedRoute allowedRoles={['KITCHEN_STAFF']} redirectTo="/staff/orders">
+                    <InventoryList />
+                  </ProtectedRoute>
+                }
+              />
             </Route>
 
             {/* Catch all - Redirect to home */}

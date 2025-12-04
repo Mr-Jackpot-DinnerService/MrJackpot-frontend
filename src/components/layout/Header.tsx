@@ -17,30 +17,45 @@ export default function Header() {
   return (
     <header className="bg-white border-b sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 py-4">
-        <div className="flex items-center justify-between">
-          {/* Left Navigation */}
-          <div className="hidden md:flex items-center gap-6 w-20">
-            {/* Spacer to help center logo if needed, or just empty */}
+        <div className="grid grid-cols-3 items-center">
+          {/* Left Navigation - 빈 공간 */}
+          <div className="flex items-center justify-start">
+            {/* 왼쪽 공간 - 필요시 네비게이션 추가 가능 */}
           </div>
 
-          {/* Logo */}
-          <Link to="/" className="flex items-center">
-            <span className="text-red-600 text-2xl font-serif font-bold">Mr. DaeBak</span>
-          </Link>
+          {/* Logo - 가운데 정렬 */}
+          <div className="flex justify-center">
+            <Link to="/" className="flex items-center">
+              <span className="text-red-600 text-2xl font-serif font-bold">Mr. DaeBak</span>
+            </Link>
+          </div>
 
           {/* Right Navigation */}
-          <div className="flex items-center gap-4">
-            
+          <div className="flex items-center justify-end gap-4">
+
             {user ? (
               <>
+                {/* 직원인 경우 직원 대시보드 링크 표시 */}
+                {(user.role === 'KITCHEN_STAFF' || user.role === 'DELIVERY_STAFF') && (
+                  <Link to="/staff/orders">
+                    <Button variant="ghost">
+                      직원 대시보드
+                    </Button>
+                  </Link>
+                )}
+
                 <Button variant="outline" onClick={handleLogout}>
                   로그아웃
                 </Button>
-                <Link to="/customer/mypage">
-                  <Button variant="ghost" size="icon">
-                    <User className="h-5 w-5" />
-                  </Button>
-                </Link>
+
+                {/* 고객인 경우에만 마이페이지 링크 표시 */}
+                {user.role === 'CUSTOMER' && (
+                  <Link to="/customer/mypage">
+                    <Button variant="ghost" size="icon">
+                      <User className="h-5 w-5" />
+                    </Button>
+                  </Link>
+                )}
               </>
             ) : (
               <>
@@ -53,17 +68,21 @@ export default function Header() {
               </>
             )}
 
-            <Link to="/customer/cart" className="relative">
-              <Button variant="ghost" size="icon">
-                <ShoppingCart className="h-5 w-5" />
-                {items.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {items.length}
-                  </span>
-                )}
-              </Button>
-            </Link>
+            {/* 고객인 경우에만 장바구니 표시 */}
+            {user?.role === 'CUSTOMER' && (
+              <Link to="/customer/cart" className="relative">
+                <Button variant="ghost" size="icon">
+                  <ShoppingCart className="h-5 w-5" />
+                  {items.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                      {items.length}
+                    </span>
+                  )}
+                </Button>
+              </Link>
+            )}
 
+            {/* 모바일 햄버거 메뉴 */}
             <Button variant="ghost" size="icon" className="md:hidden">
               <Menu className="h-5 w-5" />
             </Button>

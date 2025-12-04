@@ -24,7 +24,7 @@ export interface AuthResponse {
     email: string;
     phone: string;
     address?: string;
-    role: 'CUSTOMER' | 'STAFF';
+    role: 'CUSTOMER' | 'KITCHEN_STAFF' | 'DELIVERY_STAFF';
   };
 }
 
@@ -71,20 +71,19 @@ export interface CartItemRequest {
   componentModifications?: Record<string, number>;
 }
 
-export interface CartItem {
-  id: number;
+export interface BackendCartItem {
+  cartMenuId: number;
   dinnerType: DinnerType;
   servingStyle: ServingStyle;
   quantity: number;
-  componentModifications: Record<string, number>;
-  totalPrice: number;
+  pricePerUnit: number;
+  components: ComponentQuantity[];
 }
 
 export interface CartResponse {
-  items: CartItem[];
+  cartId: number;
   totalPrice: number;
-  deliveryFee: number;
-  finalPrice: number;
+  items: BackendCartItem[];
 }
 
 // 주문 관련 타입
@@ -102,14 +101,12 @@ export interface Order {
   status: 'PENDING' | 'COOKING' | 'DELIVERING' | 'COMPLETED' | 'CANCELLED';
   orderTime: string;
   totalPrice: number;
-  deliveryFee: number;
-  finalPrice: number;
   receiverName: string;
   receiverPhone: string;
   address: string;
   paymentMethod: string;
   deliveryType: string;
-  items: CartItem[];
+  items: BackendCartItem[];
 }
 
 export interface CancelOrderRequest {

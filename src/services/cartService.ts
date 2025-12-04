@@ -46,7 +46,7 @@ export class CartService {
 
   // 장바구니 총 가격 계산 (프론트엔드에서 임시 계산용)
   static calculateCartTotal(items: CartResponse['items']): number {
-    return items.reduce((total, item) => total + item.totalPrice, 0);
+    return items.reduce((total, item) => total + (item.pricePerUnit * item.quantity), 0);
   }
 }
 

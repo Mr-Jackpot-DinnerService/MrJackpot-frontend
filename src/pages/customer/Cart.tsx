@@ -104,17 +104,10 @@ export default function Cart() {
           <span className="text-gray-600">상품 금액</span>
           <span>{totalPrice.toLocaleString()}원</span>
         </div>
-        <div className="flex justify-between items-center mb-4">
-          <span className="text-gray-600">배달비</span>
-          <span>{backendCart ? backendCart.deliveryFee.toLocaleString() : '3,000'}원</span>
-        </div>
         <div className="border-t pt-4 flex justify-between items-center text-xl">
           <span>총 결제 금액</span>
           <span className="text-red-600">
-            {backendCart ?
-              backendCart.finalPrice.toLocaleString() :
-              (totalPrice + 3000).toLocaleString()
-            }원
+            {totalPrice.toLocaleString()}원
           </span>
         </div>
       </div>

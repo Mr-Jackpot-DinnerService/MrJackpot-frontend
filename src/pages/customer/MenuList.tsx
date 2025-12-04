@@ -29,6 +29,12 @@ interface MenuItem {
 
 // 백엔드 DinnerType을 MenuItem으로 변환하는 함수
 const convertDinnerTypeToMenuItem = (dinnerType: DinnerType, servingStyles: string[]): MenuItem => {
+  // 샴페인 축제 디너는 Simple 스타일 제외
+  let availableStyles = servingStyles;
+  if (dinnerType.description === '샴페인 축제 디너') {
+    availableStyles = servingStyles.filter(style => style !== '심플');
+  }
+
   return {
     id: dinnerType.code,
     name: dinnerType.description,
@@ -36,7 +42,7 @@ const convertDinnerTypeToMenuItem = (dinnerType: DinnerType, servingStyles: stri
     price: dinnerType.price,
     image: dinnerType.imageUrl || '/placeholder-menu-image.jpg',
     category: 'dinner',
-    options: servingStyles,
+    options: availableStyles,
     components: dinnerType.recipe.map(comp => ({
       name: comp.componentName,
       defaultQuantity: comp.quantity,
@@ -100,7 +106,12 @@ export default function MenuList() {
 
   const handleMenuClick = (menu: MenuItem) => {
     setSelectedMenu(menu);
-    setSelectedOptions(menu.options.length > 0 ? [menu.options[0]] : []);
+    // 샴페인 축제 디너의 경우 그랜드를 기본으로, 그 외에는 첫 번째 옵션을 기본으로
+    let defaultOption = menu.options[0];
+    if (menu.name === '샴페인 축제 디너' && menu.options.includes('그랜드')) {
+      defaultOption = '그랜드';
+    }
+    setSelectedOptions(menu.options.length > 0 ? [defaultOption] : []);
     setQuantity(1);
     setRequest('');
   };
@@ -113,8 +124,20 @@ export default function MenuList() {
     });
   };
 
+  // 모든 구성이 0인지 확인하는 함수
+  const isAllComponentsZero = () => {
+    if (!selectedMenu) return false;
+    return selectedMenu.components.every(comp => {
+      const currentQty = componentQuantities[comp.name] !== undefined ? componentQuantities[comp.name] : comp.defaultQuantity;
+      return currentQty === 0;
+    });
+  };
+
   const calculateTotalPrice = () => {
     if (!selectedMenu || !menuReference) return 0;
+
+    // 모든 구성이 0이면 0 반환
+    if (isAllComponentsZero()) return 0;
 
     // 기본 디너 가격
     let total = selectedMenu.price;
@@ -124,7 +147,8 @@ export default function MenuList() {
       const selectedServingStyle = selectedOptions[0];
       const servingStylePrice = MenuService.calculateServingStylePrice(
         menuReference.servingStyles.find(s => s.description === selectedServingStyle)?.code || '',
-        menuReference
+        menuReference,
+        selectedMenu.name
       );
       total += servingStylePrice;
     }
@@ -132,7 +156,7 @@ export default function MenuList() {
     // 재료 변경 추가 요금
     const modifications: Record<string, number> = {};
     selectedMenu.components.forEach(comp => {
-      const currentQty = componentQuantities[comp.name] || comp.defaultQuantity;
+      const currentQty = componentQuantities[comp.name] !== undefined ? componentQuantities[comp.name] : comp.defaultQuantity;
       const diff = currentQty - comp.defaultQuantity;
       if (diff !== 0) {
         // 컴포넌트 코드 찾기
@@ -143,10 +167,14 @@ export default function MenuList() {
       }
     });
 
-    const modificationPrice = MenuService.calculateComponentModificationPrice(modifications, menuReference);
+    const modificationPrice = MenuService.calculateComponentModificationPrice(modifications, menuReference, selectedMenu.price);
     total += modificationPrice;
 
-    return total * quantity;
+    // 음수 방지 - 최소 0원
+    const finalPrice = Math.max(0, total * quantity);
+
+    // 100원 단위로 반올림
+    return Math.round(finalPrice / 100) * 100;
   };
 
   const handleAddToCart = () => {
@@ -156,11 +184,12 @@ export default function MenuList() {
       const changes: string[] = [];
 
       selectedMenu.components.forEach(comp => {
-        const currentQty = componentQuantities[comp.name] || comp.defaultQuantity;
+        const currentQty = componentQuantities[comp.name] !== undefined ? componentQuantities[comp.name] : comp.defaultQuantity;
         const diff = currentQty - comp.defaultQuantity;
         if (diff !== 0) {
           const componentType = menuReference.componentTypes.find(ct => ct.description === comp.name);
           if (componentType) {
+            console.log(`컴포넌트 수정: ${comp.name} -> 코드: ${componentType.code}, 차이: ${diff}`);
             modifications[componentType.code] = diff;
           }
           changes.push(`${comp.name}: ${currentQty}개 (기본 ${comp.defaultQuantity}개)`);
@@ -175,10 +204,14 @@ export default function MenuList() {
         menuReference.servingStyles.find(s => s.description === selectedOptions[0])?.code || '' :
         menuReference.servingStyles[0]?.code || '';
 
+      // 반올림된 총 가격 계산
+      const roundedTotalPrice = calculateTotalPrice();
+      const unitPrice = Math.round(roundedTotalPrice / quantity / 100) * 100; // 단위 가격도 100원 단위로 반올림
+
       addToCart({
         menuId: selectedMenu.id,
         name: selectedMenu.name,
-        price: calculateTotalPrice() / quantity,
+        price: unitPrice,
         quantity,
         options: selectedOptions,
         image: selectedMenu.image,
@@ -249,22 +282,29 @@ export default function MenuList() {
                   <div>
                     <Label className="mb-2 block font-semibold">서빙 스타일</Label>
                     <div className="space-y-2">
-                      {selectedMenu.options.map(option => (
-                        <div key={option} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={option}
-                            checked={selectedOptions.includes(option)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedOptions([option]);
-                              }
-                            }}
-                          />
-                          <label htmlFor={option} className="cursor-pointer">
-                            {option}
-                          </label>
-                        </div>
-                      ))}
+                      {selectedMenu.options.map(option => {
+                        // 샴페인 축제 디너에서 심플 옵션 숨기기
+                        if (selectedMenu.name === '샴페인 축제 디너' && option === '심플') {
+                          return null;
+                        }
+
+                        return (
+                          <div key={option} className="flex items-center space-x-2">
+                            <Checkbox
+                              id={option}
+                              checked={selectedOptions.includes(option)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedOptions([option]);
+                                }
+                              }}
+                            />
+                            <label htmlFor={option} className="cursor-pointer">
+                              {option}
+                            </label>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -338,7 +378,7 @@ export default function MenuList() {
                 </div>
 
                 <div className="text-2xl font-bold text-right text-red-600">
-                  합계: {calculateTotalPrice().toLocaleString()}원
+                  합계: {isAllComponentsZero() ? '-원' : `${calculateTotalPrice().toLocaleString()}원`}
                 </div>
               </div>
 
@@ -346,7 +386,11 @@ export default function MenuList() {
                 <Button variant="outline" onClick={() => setSelectedMenu(null)}>
                   취소
                 </Button>
-                <Button className="bg-red-600 hover:bg-red-700" onClick={handleAddToCart}>
+                <Button
+                  className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  onClick={handleAddToCart}
+                  disabled={isAllComponentsZero()}
+                >
                   장바구니에 추가
                 </Button>
               </DialogFooter>

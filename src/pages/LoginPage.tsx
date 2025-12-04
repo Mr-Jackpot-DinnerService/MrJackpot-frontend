@@ -19,7 +19,7 @@ export default function LoginPage() {
     if (user && !loading) {
       if (user.role === 'CUSTOMER') {
         navigate('/');
-      } else if (user.role === 'STAFF') {
+      } else if (user.role === 'KITCHEN_STAFF' || user.role === 'DELIVERY_STAFF') {
         navigate('/staff/orders');
       }
     }

@@ -1,11 +1,12 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { Bike, Store, MapPin, Utensils, Mic } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
 import { Button } from '../components/ui/button';
-import { Alert, AlertDescription } from '../components/ui/alert';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { OrderService, type Order } from '../services';
 import {
   Carousel,
   CarouselContent,
@@ -15,46 +16,81 @@ import {
 } from "../components/ui/carousel";
 import { Card, CardContent } from "../components/ui/card";
 
-const recentOrders = [
-  {
-    id: 1,
-    items: ["발렌타인 디너"],
-    date: "2024.11.20",
-    price: "80,000원",
-    image: "https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=400&h=300&fit=crop"
-  },
-  {
-    id: 2,
-    items: ["프렌치 디너"],
-    date: "2024.11.18",
-    price: "70,000원",
-    image: "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=400&h=300&fit=crop"
-  },
-  {
-    id: 3,
-    items: ["잉글리시 디너"],
-    date: "2024.11.15",
-    price: "60,000원",
-    image: "https://images.unsplash.com/photo-1544025162-d76694265947?w=400&h=300&fit=crop"
-  },
-  {
-    id: 4,
-    items: ["샴페인 축제 디너"],
-    date: "2024.11.10",
-    price: "120,000원",
-    image: "https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=400&h=300&fit=crop"
-  },
-  {
-    id: 5,
-    items: ["발렌타인 디너", "프렌치 디너"],
-    date: "2024.11.05",
-    price: "150,000원",
-    image: "https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=400&h=300&fit=crop"
-  },
-];
+// 주문 데이터를 표시용으로 변환하는 함수
+const convertOrderToDisplay = (order: Order) => {
+  const firstItem = order.items[0];
+  const itemNames = order.items.map(item => item.dinnerType.description);
+
+  return {
+    id: order.id,
+    items: itemNames,
+    date: new Date(order.orderTime).toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).replace(/\./g, '.'),
+    price: `${order.finalPrice.toLocaleString()}원`,
+    image: firstItem?.dinnerType.imageUrl || '/placeholder-menu-image.jpg'
+  };
+};
 
 export default function LandingPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  // 직원이 루트 페이지에 접근했을 때 직원 대시보드로 리다이렉트
+  useEffect(() => {
+    if (!loading && user && (user.role === 'KITCHEN_STAFF' || user.role === 'DELIVERY_STAFF')) {
+      console.log('Redirecting staff to dashboard:', user.role);
+      navigate('/staff/orders', { replace: true });
+    }
+  }, [user, loading, navigate]);
+
+  // 최근 주문 내역 로드
+  useEffect(() => {
+    const loadRecentOrders = async () => {
+      if (!user) {
+        setRecentOrders([]);
+        return;
+      }
+
+      try {
+        setLoadingOrders(true);
+        const orders = await OrderService.getMyOrders();
+
+        // 최근 5개 주문만 가져오기
+        const recentOrdersData = orders
+          .slice(0, 5)
+          .map(convertOrderToDisplay);
+
+        setRecentOrders(recentOrdersData);
+      } catch (error) {
+        console.error('최근 주문 내역 로드 실패:', error);
+        // 에러 발생시 빈 배열로 설정
+        setRecentOrders([]);
+      } finally {
+        setLoadingOrders(false);
+      }
+    };
+
+    loadRecentOrders();
+  }, [user]);
+
+  // 로딩 중이거나 직원인 경우 로딩 화면 표시
+  if (loading || (user && (user.role === 'KITCHEN_STAFF' || user.role === 'DELIVERY_STAFF'))) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">
+            {loading ? '로딩 중...' : '직원 대시보드로 이동 중...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -63,12 +99,14 @@ export default function LandingPage() {
       <main className="flex-1">
         {/* Address Alert */}
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <Alert className="bg-white border">
-            <MapPin className="h-4 w-4 text-red-600" />
-            <AlertDescription className="ml-2">
-              {!user ? "로그인을 해 주세요." : (user.address || "기본 주소를 등록해 주세요.")}
-            </AlertDescription>
-          </Alert>
+          <div className="bg-white border rounded-lg p-4">
+            <div className="flex items-center justify-center gap-2 text-center">
+              <MapPin className="h-4 w-4 text-red-600 flex-shrink-0" />
+              <span className="text-gray-700">
+                {!user ? "로그인을 해 주세요." : (user.address || "기본 주소를 등록해 주세요.")}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Order Type Buttons */}
@@ -104,57 +142,70 @@ export default function LandingPage() {
           </div>
 
           {/* Recent Orders Carousel */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <h2 className="text-xl font-bold">최근 주문 내역</h2>
-              <Link to="/customer/order-history" className="text-sm text-gray-500 hover:text-red-600">
-                전체보기
-              </Link>
+          {user && (
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-4 px-1">
+                <h2 className="text-xl font-bold">최근 주문 내역</h2>
+                <Link to="/customer/order-history" className="text-sm text-gray-500 hover:text-red-600">
+                  전체보기
+                </Link>
+              </div>
+
+              {loadingOrders ? (
+                <div className="flex justify-center items-center h-32">
+                  <div className="text-gray-600">주문 내역을 불러오는 중...</div>
+                </div>
+              ) : recentOrders.length === 0 ? (
+                <div className="flex justify-center items-center h-32">
+                  <div className="text-gray-600">최근 주문 내역이 없습니다.</div>
+                </div>
+              ) : (
+                <div className="px-12">
+                  <Carousel
+                    opts={{
+                      align: "start",
+                      loop: false,
+                    }}
+                    className="w-full"
+                  >
+                    <CarouselContent>
+                      {recentOrders.map((order) => (
+                        <CarouselItem key={order.id} className="md:basis-1/2 lg:basis-1/4">
+                          <Card className="border hover:shadow-md transition-shadow cursor-pointer h-full">
+                            <CardContent className="p-4">
+                              <div className="aspect-video relative mb-3 rounded-md overflow-hidden">
+                                <ImageWithFallback
+                                  src={order.image}
+                                  alt={order.items[0]}
+                                  className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <div className="h-12 overflow-hidden">
+                                  <h3 className="font-medium text-sm line-clamp-2">
+                                    {order.items.join(", ")}
+                                  </h3>
+                                </div>
+                                <div className="flex justify-between items-center text-sm text-gray-500">
+                                  <span>{order.date}</span>
+                                  <span className="font-semibold text-red-600">{order.price}</span>
+                                </div>
+                              </div>
+                              <Button variant="outline" className="w-full mt-3 text-xs h-8">
+                                재주문
+                              </Button>
+                            </CardContent>
+                          </Card>
+                        </CarouselItem>
+                      ))}
+                    </CarouselContent>
+                    <CarouselPrevious />
+                    <CarouselNext />
+                  </Carousel>
+                </div>
+              )}
             </div>
-            <div className="px-12">
-              <Carousel
-                opts={{
-                  align: "start",
-                  loop: false,
-                }}
-                className="w-full"
-              >
-                <CarouselContent>
-                  {recentOrders.map((order) => (
-                    <CarouselItem key={order.id} className="md:basis-1/2 lg:basis-1/4">
-                      <Card className="border hover:shadow-md transition-shadow cursor-pointer h-full">
-                        <CardContent className="p-4">
-                          <div className="aspect-video relative mb-3 rounded-md overflow-hidden">
-                            <ImageWithFallback
-                              src={order.image}
-                              alt={order.items[0]}
-                              className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <div className="h-12 overflow-hidden">
-                              <h3 className="font-medium text-sm line-clamp-2">
-                                {order.items.join(", ")}
-                              </h3>
-                            </div>
-                            <div className="flex justify-between items-center text-sm text-gray-500">
-                              <span>{order.date}</span>
-                              <span className="font-semibold text-red-600">{order.price}</span>
-                            </div>
-                          </div>
-                          <Button variant="outline" className="w-full mt-3 text-xs h-8">
-                            재주문
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    </CarouselItem>
-                  ))}
-                </CarouselContent>
-                <CarouselPrevious />
-                <CarouselNext />
-              </Carousel>
-            </div>
-          </div>
+          )}
 
           {/* Promotional Banner */}
           <div className="bg-gradient-to-r from-red-900 to-red-700 rounded-lg overflow-hidden">

@@ -23,6 +23,26 @@ export class CartService {
     }
   }
 
+  // 장바구니에서 아이템 삭제
+  static async removeFromCart(cartMenuId: number): Promise<void> {
+    try {
+      await apiClient.delete<void>(`/cart/items/${cartMenuId}`);
+    } catch (error) {
+      console.error('Failed to remove item from cart:', error);
+      throw error;
+    }
+  }
+
+  // 장바구니 아이템 수량 업데이트
+  static async updateQuantity(cartMenuId: number, quantity: number): Promise<void> {
+    try {
+      await apiClient.patch<void>(`/cart/items/${cartMenuId}?quantity=${quantity}`);
+    } catch (error) {
+      console.error('Failed to update item quantity:', error);
+      throw error;
+    }
+  }
+
   // 장바구니 비우기
   static async clearCart(): Promise<void> {
     try {

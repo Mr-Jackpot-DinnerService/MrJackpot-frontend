@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 
 export default function Cart() {
   const navigate = useNavigate();
-  const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
+  const { items, removeFromCart, removeFromCartBackend, updateQuantity, totalPrice, clearCart } = useCart();
   const [backendCart, setBackendCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +20,11 @@ export default function Cart() {
         setLoading(true);
         const cartData = await CartService.getCart();
         setBackendCart(cartData);
-        console.log('백엔드 장바구니 데이터:', cartData);
+        console.log('백엔드 장바구니 데이터:', JSON.stringify(cartData, null, 2));
+        console.log('백엔드 아이템 개수:', cartData?.items?.length || 0);
+        if (cartData?.items?.[0]) {
+          console.log('첫 번째 아이템 상세:', JSON.stringify(cartData.items[0], null, 2));
+        }
       } catch (error) {
         console.error('장바구니 데이터 로드 실패:', error);
         // 로그인하지 않은 경우 등은 에러를 표시하지 않음
@@ -32,7 +36,7 @@ export default function Cart() {
     loadCartData();
   }, []);
 
-  if (items.length === 0) {
+  if ((!backendCart || backendCart.items.length === 0) && items.length === 0) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-16 text-center">
         <h1 className="text-3xl mb-4">장바구니</h1>
@@ -44,70 +48,208 @@ export default function Cart() {
     );
   }
 
+  // 백엔드 장바구니 데이터를 우선 사용 (항상 백엔드 데이터만 사용)
+  const cartItems = backendCart?.items || [];
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <h1 className="text-3xl mb-8">장바구니</h1>
 
       <div className="space-y-4 mb-8">
-        {items.map(item => (
-          <div key={item.id} className="bg-white border rounded-lg p-4 flex gap-4">
-            <ImageWithFallback
-              src={item.image}
-              alt={item.name}
-              className="w-24 h-24 object-cover rounded"
-            />
+        {cartItems.map(item => {
+          // 백엔드 데이터 형식 확인
+          const isBackendItem = 'cartMenuId' in item;
 
-            <div className="flex-1">
-              <h3 className="mb-1">{item.name}</h3>
-              {item.options.length > 0 && (
-                <p className="text-sm text-gray-600 mb-2">서빙 스타일: {item.options.join(', ')}</p>
-              )}
-              {item.request && (
-                <p className="text-sm text-blue-600 mb-2">요청사항: {item.request}</p>
-              )}
-              <p className="text-red-600">{item.price.toLocaleString()}원</p>
-            </div>
+          if (isBackendItem) {
+            // 백엔드 장바구니 아이템 렌더링
+            // dinnerType과 servingStyle은 enum 문자열이므로 적절한 표시명 매핑
+            const dinnerTypeNames: Record<string, string> = {
+              'VALENTINE_DINNER': '발렌타인 디너',
+              'FRENCH_DINNER': '프랑스식 디너',
+              'ENGLISH_DINNER': '영국식 디너',
+              'CHAMP_FEAST_DINNER': '샴페인 축제 디너'
+            };
 
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                >
-                  -
-                </Button>
-                <span className="w-12 text-center">{item.quantity}</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                >
-                  +
-                </Button>
+            const servingStyleNames: Record<string, string> = {
+              'SIMPLE': '심플',
+              'GRAND': '그랜드',
+              'DELUXE': '디럭스'
+            };
+
+            const dinnerName = dinnerTypeNames[String(item.dinnerType)] || String(item.dinnerType);
+            const styleName = servingStyleNames[String(item.servingStyle)] || String(item.servingStyle);
+
+            return (
+              <div key={item.cartMenuId} className="bg-white border rounded-lg p-4 flex gap-4">
+                <div className="w-24 h-24 bg-gray-200 rounded flex items-center justify-center">
+                  <span className="text-gray-500 text-xs">이미지</span>
+                </div>
+
+                <div className="flex-1">
+                  <h3 className="mb-1 font-semibold">{dinnerName}</h3>
+                  <p className="text-sm text-gray-600 mb-2">서빙 스타일: {styleName}</p>
+
+                  {/* 구성 재료 표시 */}
+                  {item.components && item.components.length > 0 && (
+                    <div className="text-sm text-gray-600 mb-2">
+                      <span>구성: </span>
+                      {item.components.map((comp, index) => (
+                        <span key={comp.componentCode}>
+                          {comp.componentName} x{comp.quantity}
+                          {index < item.components.length - 1 ? ', ' : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-red-600 font-semibold">{(item.pricePerUnit * item.quantity).toLocaleString()}원</p>
+                  <p className="text-sm text-gray-500">단가: {item.pricePerUnit.toLocaleString()}원</p>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const newQuantity = item.quantity - 1;
+                          if (newQuantity <= 0) {
+                            // 수량이 0이 되면 아이템 삭제
+                            await removeFromCartBackend(item.cartMenuId);
+                          } else {
+                            await CartService.updateQuantity(item.cartMenuId, newQuantity);
+                          }
+
+                          // 백엔드 장바구니 다시 로드
+                          const cartResponse = await CartService.getCart();
+                          setBackendCart(cartResponse);
+                          toast.success('수량이 변경되었습니다.');
+                        } catch (error) {
+                          console.error('수량 감소 실패:', error);
+                          toast.error('수량 변경에 실패했습니다.');
+                        }
+                      }}
+                    >
+                      -
+                    </Button>
+                    <span className="w-12 text-center">{item.quantity}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const newQuantity = item.quantity + 1;
+                          await CartService.updateQuantity(item.cartMenuId, newQuantity);
+
+                          // 백엔드 장바구니 다시 로드
+                          const cartResponse = await CartService.getCart();
+                          setBackendCart(cartResponse);
+                          toast.success('수량이 변경되었습니다.');
+                        } catch (error) {
+                          console.error('수량 증가 실패:', error);
+                          toast.error('수량 변경에 실패했습니다.');
+                        }
+                      }}
+                    >
+                      +
+                    </Button>
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={async () => {
+                      try {
+                        // CartContext의 removeFromCartBackend 함수 사용
+                        await removeFromCartBackend(item.cartMenuId);
+
+                        // 백엔드 장바구니도 다시 로드
+                        const cartResponse = await CartService.getCart();
+                        setBackendCart(cartResponse);
+                        console.log('아이템 삭제 후 백엔드 장바구니 상태:', cartResponse);
+                        toast.success('아이템이 삭제되었습니다.');
+                      } catch (error) {
+                        console.error('장바구니 아이템 삭제 실패:', error);
+                        toast.error('삭제에 실패했습니다.');
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-5 w-5 text-red-600" />
+                  </Button>
+                </div>
               </div>
+            );
+          } else {
+            // 로컬 장바구니 아이템 렌더링 (기존 방식)
+            return (
+              <div key={item.id} className="bg-white border rounded-lg p-4 flex gap-4">
+                <ImageWithFallback
+                  src={item.image}
+                  alt={item.name}
+                  className="w-24 h-24 object-cover rounded"
+                />
 
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => removeFromCart(item.id)}
-              >
-                <Trash2 className="h-5 w-5 text-red-600" />
-              </Button>
-            </div>
-          </div>
-        ))}
+                <div className="flex-1">
+                  <h3 className="mb-1">{item.name}</h3>
+                  {item.options.length > 0 && (
+                    <p className="text-sm text-gray-600 mb-2">서빙 스타일: {item.options.join(', ')}</p>
+                  )}
+                  {item.request && (
+                    <p className="text-sm text-blue-600 mb-2">요청사항: {item.request}</p>
+                  )}
+                  <p className="text-red-600">{item.price.toLocaleString()}원</p>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                    >
+                      -
+                    </Button>
+                    <span className="w-12 text-center">{item.quantity}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                    >
+                      +
+                    </Button>
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeFromCart(item.id)}
+                  >
+                    <Trash2 className="h-5 w-5 text-red-600" />
+                  </Button>
+                </div>
+              </div>
+            );
+          }
+        })}
       </div>
 
       <div className="bg-gray-50 rounded-lg p-6 mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <span className="text-gray-600">상품 금액</span>
-          <span>{totalPrice.toLocaleString()}원</span>
-        </div>
-        <div className="border-t pt-4 flex justify-between items-center text-xl">
+        <div className="flex justify-between items-center text-xl">
           <span>총 결제 금액</span>
           <span className="text-red-600">
-            {totalPrice.toLocaleString()}원
+            {(() => {
+              // 백엔드 장바구니가 있고 아이템이 있으면 백엔드 가격 사용
+              if (backendCart && backendCart.items.length > 0) {
+                return backendCart.totalPrice.toLocaleString();
+              }
+              // 백엔드 장바구니가 있지만 아이템이 없으면 0원
+              if (backendCart && backendCart.items.length === 0) {
+                return '0';
+              }
+              // 백엔드 장바구니가 없으면 로컬 totalPrice 사용
+              return totalPrice.toLocaleString();
+            })()}원
           </span>
         </div>
       </div>
@@ -133,7 +275,7 @@ export default function Cart() {
                 receiverPhone: '010-0000-0000',
                 address: '배달 주소',
                 paymentMethod: 'CARD',
-                deliveryType: 'IMMEDIATE'
+                deliveryType: 'INSTANT'
               });
 
               console.log('주문 생성 완료, ID:', orderId);

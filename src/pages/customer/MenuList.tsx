@@ -61,6 +61,7 @@ export default function MenuList() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
   const [loading, setLoading] = useState(true);
+  const [addingToCart, setAddingToCart] = useState(false);
   const { addToCart } = useCart();
 
   // 메뉴 데이터 로드
@@ -159,7 +160,7 @@ export default function MenuList() {
       const currentQty = componentQuantities[comp.name] !== undefined ? componentQuantities[comp.name] : comp.defaultQuantity;
       const diff = currentQty - comp.defaultQuantity;
       if (diff !== 0) {
-        // 컴포넌트 코드 찾기
+        // 컴포넌트 코드 찾기 - 여기서는 여전히 차이값 사용 (가격 계산용)
         const componentType = menuReference.componentTypes.find(ct => ct.description === comp.name);
         if (componentType) {
           modifications[componentType.code] = diff;
@@ -177,22 +178,24 @@ export default function MenuList() {
     return Math.round(finalPrice / 100) * 100;
   };
 
-  const handleAddToCart = () => {
-    if (selectedMenu && menuReference) {
+  const handleAddToCart = async () => {
+    if (selectedMenu && menuReference && !addingToCart) {
+      setAddingToCart(true);
       // 구성 변경 내용 정리
       const modifications: Record<string, number> = {};
       const changes: string[] = [];
 
       selectedMenu.components.forEach(comp => {
         const currentQty = componentQuantities[comp.name] !== undefined ? componentQuantities[comp.name] : comp.defaultQuantity;
-        const diff = currentQty - comp.defaultQuantity;
-        if (diff !== 0) {
-          const componentType = menuReference.componentTypes.find(ct => ct.description === comp.name);
-          if (componentType) {
-            console.log(`컴포넌트 수정: ${comp.name} -> 코드: ${componentType.code}, 차이: ${diff}`);
-            modifications[componentType.code] = diff;
+        const componentType = menuReference.componentTypes.find(ct => ct.description === comp.name);
+        if (componentType) {
+          // 절대 수량을 전송 (차이값이 아닌)
+          console.log(`컴포넌트: ${comp.name} -> 코드: ${componentType.code}, 현재 수량: ${currentQty} (기본: ${comp.defaultQuantity})`);
+          modifications[componentType.code] = currentQty;
+
+          if (currentQty !== comp.defaultQuantity) {
+            changes.push(`${comp.name}: ${currentQty}개 (기본 ${comp.defaultQuantity}개)`);
           }
-          changes.push(`${comp.name}: ${currentQty}개 (기본 ${comp.defaultQuantity}개)`);
         }
       });
 
@@ -208,22 +211,29 @@ export default function MenuList() {
       const roundedTotalPrice = calculateTotalPrice();
       const unitPrice = Math.round(roundedTotalPrice / quantity / 100) * 100; // 단위 가격도 100원 단위로 반올림
 
-      addToCart({
-        menuId: selectedMenu.id,
-        name: selectedMenu.name,
-        price: unitPrice,
-        quantity,
-        options: selectedOptions,
-        image: selectedMenu.image,
-        request: fullRequest.trim() || undefined,
-        // API 연결을 위한 추가 정보
-        dinnerType: selectedMenu.id,
-        servingStyle: servingStyleCode,
-        componentModifications: modifications,
-      });
+      try {
+        addToCart({
+          menuId: selectedMenu.id,
+          name: selectedMenu.name,
+          price: unitPrice,
+          quantity,
+          options: selectedOptions,
+          image: selectedMenu.image,
+          request: fullRequest.trim() || undefined,
+          // API 연결을 위한 추가 정보
+          dinnerType: selectedMenu.id,
+          servingStyle: servingStyleCode,
+          componentModifications: modifications,
+        });
 
-      toast.success('장바구니에 추가되었습니다.');
-      setSelectedMenu(null);
+        toast.success('장바구니에 추가되었습니다.');
+        setSelectedMenu(null);
+      } catch (error) {
+        console.error('장바구니 추가 중 오류:', error);
+        toast.error('장바구니 추가에 실패했습니다.');
+      } finally {
+        setAddingToCart(false);
+      }
     }
   };
 
@@ -389,9 +399,9 @@ export default function MenuList() {
                 <Button
                   className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                   onClick={handleAddToCart}
-                  disabled={isAllComponentsZero()}
+                  disabled={isAllComponentsZero() || addingToCart}
                 >
-                  장바구니에 추가
+                  {addingToCart ? '추가 중...' : '장바구니에 추가'}
                 </Button>
               </DialogFooter>
             </>

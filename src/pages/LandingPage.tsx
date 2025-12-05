@@ -6,7 +6,8 @@ import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
 import { Button } from '../components/ui/button';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { OrderService, type Order } from '../services';
+import { OrderService, CartService, MenuService, type Order, type MenuReference } from '../services';
+import { toast } from 'sonner';
 import {
   Carousel,
   CarouselContent,
@@ -16,21 +17,42 @@ import {
 } from "../components/ui/carousel";
 import { Card, CardContent } from "../components/ui/card";
 
+// enum 문자열을 한글로 변환하는 함수들
+const getDinnerTypeName = (dinnerType: string): string => {
+  const dinnerTypeNames: Record<string, string> = {
+    'VALENTINE_DINNER': '발렌타인 디너',
+    'FRENCH_DINNER': '프랑스식 디너',
+    'ENGLISH_DINNER': '영국식 디너',
+    'CHAMP_FEAST_DINNER': '샴페인 축제 디너'
+  };
+  return dinnerTypeNames[dinnerType] || dinnerType;
+};
+
+const getServingStyleName = (servingStyle: string): string => {
+  const servingStyleNames: Record<string, string> = {
+    'SIMPLE': '심플',
+    'GRAND': '그랜드',
+    'DELUXE': '디럭스'
+  };
+  return servingStyleNames[servingStyle] || servingStyle;
+};
+
 // 주문 데이터를 표시용으로 변환하는 함수
 const convertOrderToDisplay = (order: Order) => {
   const firstItem = order.items[0];
-  const itemNames = order.items.map(item => item.dinnerType.description);
+  const itemNames = order.items.map(item => getDinnerTypeName(item.dinnerType));
 
   return {
-    id: order.id,
+    id: order.orderId,
+    originalOrder: order, // 재주문을 위한 원본 주문 데이터
     items: itemNames,
-    date: new Date(order.orderTime).toLocaleDateString('ko-KR', {
+    date: new Date(order.orderedAt).toLocaleDateString('ko-KR', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit'
     }).replace(/\./g, '.'),
-    price: `${order.finalPrice.toLocaleString()}원`,
-    image: firstItem?.dinnerType.imageUrl || '/placeholder-menu-image.jpg'
+    price: `${order.totalPrice.toLocaleString()}원`,
+    image: '/placeholder-menu-image.jpg' // 실제 이미지 URL이 없으므로 플레이스홀더 사용
   };
 };
 
@@ -39,6 +61,7 @@ export default function LandingPage() {
   const navigate = useNavigate();
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
 
   // 직원이 루트 페이지에 접근했을 때 직원 대시보드로 리다이렉트
   useEffect(() => {
@@ -58,14 +81,23 @@ export default function LandingPage() {
 
       try {
         setLoadingOrders(true);
-        const orders = await OrderService.getMyOrders();
 
-        // 최근 5개 주문만 가져오기
-        const recentOrdersData = orders
-          .slice(0, 5)
+        // 병렬로 주문 내역과 메뉴 참조 데이터 로드
+        const [orders, menuRef] = await Promise.all([
+          OrderService.getMyOrders(),
+          MenuService.getMenuReferences().catch(() => null) // 실패해도 계속 진행
+        ]);
+
+        setMenuReference(menuRef);
+
+        // 배달 완료된 주문만 필터링하고 최근 10개만 가져오기
+        const deliveredOrders = orders
+          .filter(order => order.status === 'DELIVERED')
+          .slice(0, 10)
           .map(convertOrderToDisplay);
 
-        setRecentOrders(recentOrdersData);
+        setRecentOrders(deliveredOrders);
+        console.log('최근 배달 완료 주문:', deliveredOrders);
       } catch (error) {
         console.error('최근 주문 내역 로드 실패:', error);
         // 에러 발생시 빈 배열로 설정
@@ -77,6 +109,65 @@ export default function LandingPage() {
 
     loadRecentOrders();
   }, [user]);
+
+  // 재주문 함수
+  const handleReorder = async (order: any) => {
+    if (!menuReference) {
+      toast.error('메뉴 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+
+    try {
+      setLoadingOrders(true);
+      console.log('재주문 시작:', order.originalOrder);
+
+      // 주문의 각 아이템을 장바구니에 추가
+      for (const item of order.originalOrder.items) {
+        // ComponentType enum 값들을 Record로 변환
+        const componentModifications: Record<string, number> = {};
+        item.components.forEach(comp => {
+          componentModifications[comp.componentCode] = comp.quantity;
+        });
+
+        // 가격 계산
+        let calculatedPrice;
+        if (menuReference) {
+          // MenuService를 사용해서 가격 계산
+          calculatedPrice = MenuService.calculateTotalPrice(
+            item.dinnerType,
+            item.servingStyle,
+            item.quantity,
+            componentModifications,
+            menuReference
+          );
+        } else {
+          // 메뉴 참조 데이터가 없으면 임시로 총액을 아이템 개수로 나눈 값 사용
+          const itemCount = order.originalOrder.items.reduce((sum, orderItem) => sum + orderItem.quantity, 0);
+          calculatedPrice = Math.round((order.originalOrder.totalPrice / itemCount) * item.quantity);
+        }
+
+        console.log(`아이템 ${item.dinnerType} - 계산된 가격: ${calculatedPrice}, 수량: ${item.quantity}`);
+
+        // 장바구니에 추가
+        await CartService.addToCart({
+          dinnerType: item.dinnerType,
+          servingStyle: item.servingStyle,
+          quantity: item.quantity,
+          componentModifications: componentModifications,
+          calculatedPrice: calculatedPrice
+        });
+      }
+
+      toast.success('주문 내역이 장바구니에 추가되었습니다!');
+      // 장바구니 페이지로 이동
+      navigate('/customer/cart');
+    } catch (error) {
+      console.error('재주문 실패:', error);
+      toast.error('재주문에 실패했습니다. 다시 시도해주세요.');
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
 
   // 로딩 중이거나 직원인 경우 로딩 화면 표시
   if (loading || (user && (user.role === 'KITCHEN_STAFF' || user.role === 'DELIVERY_STAFF'))) {
@@ -191,8 +282,13 @@ export default function LandingPage() {
                                   <span className="font-semibold text-red-600">{order.price}</span>
                                 </div>
                               </div>
-                              <Button variant="outline" className="w-full mt-3 text-xs h-8">
-                                재주문
+                              <Button
+                                variant="outline"
+                                className="w-full mt-3 text-xs h-8"
+                                onClick={() => handleReorder(order)}
+                                disabled={loadingOrders}
+                              >
+                                {loadingOrders ? '처리 중...' : '재주문'}
                               </Button>
                             </CardContent>
                           </Card>
@@ -219,7 +315,7 @@ export default function LandingPage() {
                   </p>
                   <p className="text-lg">
                     <span className="bg-yellow-400 text-red-900 px-4 py-2 rounded font-bold">
-                      회원 가입 시 첫 주문 10% 할인
+                      VIP 고객 10% 할인
                     </span>
                   </p>
                 </div>

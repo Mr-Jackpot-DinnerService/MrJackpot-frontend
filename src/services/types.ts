@@ -69,6 +69,7 @@ export interface CartItemRequest {
   servingStyle: string;
   quantity: number;
   componentModifications?: Record<string, number>;
+  calculatedPrice: number; // 프론트엔드에서 계산된 가격
 }
 
 export interface BackendCartItem {
@@ -92,21 +93,27 @@ export interface OrderRequest {
   receiverPhone: string;
   address: string;
   paymentMethod: 'CARD' | 'CASH';
-  deliveryType: 'IMMEDIATE' | 'RESERVATION';
+  deliveryType: 'INSTANT' | 'RESERVATION';
 }
 
 export interface Order {
-  id: number;
-  orderNumber: string;
-  status: 'PENDING' | 'COOKING' | 'DELIVERING' | 'COMPLETED' | 'CANCELLED';
-  orderTime: string;
-  totalPrice: number;
+  orderId: number;
   receiverName: string;
   receiverPhone: string;
   address: string;
+  totalPrice: number;
+  status: 'PAID_PENDING' | 'ACCEPTED' | 'COOKING' | 'COOK_DONE' | 'ON_DELIVERY' | 'DELIVERED' | 'CANCELLED' | 'REJECTED' | 'REFUNDED';
   paymentMethod: string;
   deliveryType: string;
-  items: BackendCartItem[];
+  orderedAt: string;
+  items: OrderItem[];
+}
+
+export interface OrderItem {
+  dinnerType: string;
+  servingStyle: string;
+  quantity: number;
+  components: ComponentQuantity[];
 }
 
 export interface CancelOrderRequest {

@@ -1,3 +1,4 @@
+import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart, Menu, User } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -8,6 +9,13 @@ export default function Header() {
   const { user, logout } = useAuth();
   const { items } = useCart();
   const navigate = useNavigate();
+
+  // items 변경 감지를 위한 로그
+  React.useEffect(() => {
+    const totalQuantity = items.reduce((total, item) => total + item.quantity, 0);
+    console.log('[Header] 장바구니 상태 변경됨 - 고유 아이템 개수:', items.length, '총 수량:', totalQuantity);
+    console.log('[Header] 현재 아이템들:', items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity })));
+  }, [items]);
 
   const handleLogout = () => {
     logout();

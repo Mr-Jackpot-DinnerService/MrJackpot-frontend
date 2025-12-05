@@ -45,20 +45,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const parsedUser = JSON.parse(savedUser);
 
-            // 토큰 유효성 간단 테스트: 메뉴 API 호출로 확인
+            // 토큰 유효성 간단 테스트: 인증이 필요한 API 호출로 확인
             try {
-              // 가벼운 API 호출로 토큰 유효성 확인
-              await fetch(`${import.meta.env.VITE_API_URL}/menus/references`, {
+              // 인증이 필요한 API 호출로 토큰 유효성 확인
+              const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080/api'}/cart`, {
                 headers: {
                   'Authorization': `Bearer ${token}`,
                   'Content-Type': 'application/json'
                 }
               });
+
+              if (response.status === 401) {
+                console.warn('[AuthContext] 토큰이 만료됨 - 자동 로그아웃');
+                AuthService.logout();
+                localStorage.removeItem('user');
+                // 로그인 페이지로 리다이렉트
+                if (!window.location.pathname.includes('/login')) {
+                  window.location.href = '/login';
+                }
+                return;
+              }
+
               setUser(parsedUser);
             } catch (apiError) {
-              console.warn('토큰이 유효하지 않음 - 자동 로그아웃');
+              console.warn('[AuthContext] API 호출 실패 - 자동 로그아웃');
               AuthService.logout();
               localStorage.removeItem('user');
+              if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login';
+              }
             }
           } catch (error) {
             console.error('Failed to parse saved user:', error);
@@ -74,6 +89,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     initializeAuth();
+
+    // 5분마다 토큰 유효성 확인
+    const tokenValidationInterval = setInterval(async () => {
+      const token = AuthService.getCurrentToken();
+      const currentUser = localStorage.getItem('user');
+
+      if (token && currentUser) {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080/api'}/cart`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.status === 401) {
+            console.warn('[AuthContext] 정기 검사에서 토큰 만료 감지 - 자동 로그아웃');
+            setUser(null);
+            AuthService.logout();
+            localStorage.removeItem('user');
+            if (!window.location.pathname.includes('/login')) {
+              window.location.href = '/login';
+            }
+          }
+        } catch (error) {
+          console.error('[AuthContext] 정기 토큰 검사 실패:', error);
+        }
+      }
+    }, 5 * 60 * 1000); // 5분마다 실행
+
+    return () => clearInterval(tokenValidationInterval);
   }, []);
 
   const login = async (username: string, password: string) => {

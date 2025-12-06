@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { CartService, type CartItemRequest, type CartResponse, type BackendCartItem } from '../services';
+import { ApiError } from '../services/api';
 import { useAuth } from './AuthContext';
 
 export interface CartItem {
@@ -125,6 +126,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
       console.error('Failed to add item to cart:', error);
       // 에러 발생시 토스트 메시지로 사용자에게 알림
       console.error('장바구니 추가 실패 - 네트워크 연결을 확인해주세요');
+
+      if (error instanceof ApiError) {
+        throw error;
+      }
 
       // 오프라인 모드에서는 간단한 로컬 추가만 수행
       const newItem: CartItem = {

@@ -6,6 +6,10 @@ export class UserService {
     return apiClient.put<UserProfile>('/users/me', data);
   }
 
+  static async getProfile(): Promise<UserProfile> {
+    return apiClient.get<UserProfile>('/users/me');
+  }
+
   static async changePassword(data: ChangePasswordRequest): Promise<void> {
     await apiClient.post<void>('/users/me/password', data);
   }

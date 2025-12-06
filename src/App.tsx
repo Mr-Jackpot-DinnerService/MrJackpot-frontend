@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
+import { StockProvider } from './contexts/StockContext';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
@@ -25,64 +26,66 @@ export default function App() {
     <Router>
       <AuthProvider>
         <CartProvider>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            
-            {/* Customer Routes - 고객만 접근 가능 */}
-            <Route
-              path="/customer"
-              element={
-                <ProtectedRoute allowedRoles={['CUSTOMER']} redirectTo="/login">
-                  <CustomerDashboard />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Navigate to="/customer/menu" replace />} />
-              <Route path="menu" element={<MenuList />} />
-              <Route path="cart" element={<Cart />} />
-              <Route path="order-info" element={<OrderInfo />} />
-              <Route path="order-complete" element={<OrderComplete />} />
-              <Route path="voice-order" element={<VoiceOrder />} />
-              <Route path="order-history" element={<OrderHistory />} />
-              <Route path="mypage" element={<MyPage />} />
-              <Route path="edit-profile" element={<EditProfile />} />
-              <Route path="address-management" element={<AddressManagement />} />
-              <Route path="payment-management" element={<PaymentManagement />} />
-            </Route>
-
-            {/* Staff Routes - 직원만 접근 가능 */}
-            <Route
-              path="/staff"
-              element={
-                <ProtectedRoute allowedRoles={['KITCHEN_STAFF', 'DELIVERY_STAFF']} redirectTo="/login">
-                  <StaffDashboard />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Navigate to="/staff/orders" replace />} />
+          <StockProvider>
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              
+              {/* Customer Routes - 고객만 접근 가능 */}
               <Route
-                path="orders"
+                path="/customer"
+                element={
+                  <ProtectedRoute allowedRoles={['CUSTOMER']} redirectTo="/login">
+                    <CustomerDashboard />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<Navigate to="/customer/menu" replace />} />
+                <Route path="menu" element={<MenuList />} />
+                <Route path="cart" element={<Cart />} />
+                <Route path="order-info" element={<OrderInfo />} />
+                <Route path="order-complete" element={<OrderComplete />} />
+                <Route path="voice-order" element={<VoiceOrder />} />
+                <Route path="order-history" element={<OrderHistory />} />
+                <Route path="mypage" element={<MyPage />} />
+                <Route path="edit-profile" element={<EditProfile />} />
+                <Route path="address-management" element={<AddressManagement />} />
+                <Route path="payment-management" element={<PaymentManagement />} />
+              </Route>
+
+              {/* Staff Routes - 직원만 접근 가능 */}
+              <Route
+                path="/staff"
                 element={
                   <ProtectedRoute allowedRoles={['KITCHEN_STAFF', 'DELIVERY_STAFF']} redirectTo="/login">
-                    <OrderList />
+                    <StaffDashboard />
                   </ProtectedRoute>
                 }
-              />
-              <Route
-                path="inventory"
-                element={
-                  <ProtectedRoute allowedRoles={['KITCHEN_STAFF']} redirectTo="/staff/orders">
-                    <InventoryList />
-                  </ProtectedRoute>
-                }
-              />
-            </Route>
+              >
+                <Route index element={<Navigate to="/staff/orders" replace />} />
+                <Route
+                  path="orders"
+                  element={
+                    <ProtectedRoute allowedRoles={['KITCHEN_STAFF', 'DELIVERY_STAFF']} redirectTo="/login">
+                      <OrderList />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="inventory"
+                  element={
+                    <ProtectedRoute allowedRoles={['KITCHEN_STAFF']} redirectTo="/staff/orders">
+                      <InventoryList />
+                    </ProtectedRoute>
+                  }
+                />
+              </Route>
 
-            {/* Catch all - Redirect to home */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              {/* Catch all - Redirect to home */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </StockProvider>
         </CartProvider>
       </AuthProvider>
     </Router>

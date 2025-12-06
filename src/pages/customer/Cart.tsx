@@ -2,18 +2,26 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { useCart, type CartItem } from '../../contexts/CartContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useStock } from '../../contexts/StockContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { useState, useEffect } from 'react';
-import { CartService, OrderService, type CartResponse } from '../../services';
+import { CartService, OrderService, UserService, type CartResponse, type UserProfile } from '../../services';
 import { toast } from 'sonner';
+import { extractShortageInfoFromError } from '../../utils/stockUtils';
 
 type DisplayCartItem = CartResponse['items'][number] | CartItem;
 
 export default function Cart() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { items, removeFromCart, removeFromCartBackend, updateQuantity, totalPrice, clearCart } = useCart();
+  const { registerShortage } = useStock();
   const [backendCart, setBackendCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isVip, setIsVip] = useState(false);
+  const [customerProfile, setCustomerProfile] = useState<UserProfile | null>(null);
+  const [stockError, setStockError] = useState<string | null>(null);
 
   const refreshBackendCart = async () => {
     const cartResponse = await CartService.getCart();
@@ -29,6 +37,7 @@ export default function Cart() {
         await CartService.updateQuantity(cartMenuId, newQuantity);
         await refreshBackendCart();
       }
+      setStockError(null);
       toast.success('수량이 변경되었습니다.');
     } catch (error) {
       console.error('백엔드 수량 변경 실패:', error);
@@ -49,10 +58,12 @@ export default function Cart() {
 
     if (newQuantity <= 0) {
       removeFromCart(itemId);
+      setStockError(null);
       return;
     }
 
     updateQuantity(itemId, newQuantity);
+    setStockError(null);
     toast.success('수량이 변경되었습니다.');
   };
 
@@ -79,6 +90,61 @@ export default function Cart() {
     loadCartData();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      setCustomerProfile(prev => ({
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        address: user.address,
+        role: user.role,
+      }));
+    } else {
+      setCustomerProfile(null);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const checkVipStatus = async () => {
+      if (!user || user.role !== 'CUSTOMER') {
+        setIsVip(false);
+        return;
+      }
+      try {
+        const orders = await OrderService.getMyOrders();
+        const completedOrders = orders.filter(order => order.status === 'DELIVERED');
+        setIsVip(completedOrders.length >= 10);
+      } catch (error) {
+        console.error('VIP 상태 확인 실패:', error);
+        setIsVip(false);
+      }
+    };
+
+    checkVipStatus();
+  }, [user]);
+
+  const ensureCustomerProfile = async () => {
+    if (!user) {
+      return null;
+    }
+
+    let profile = customerProfile;
+
+    if (!profile || !profile.phone || !profile.address || !profile.name) {
+      try {
+        profile = await UserService.getProfile();
+        setCustomerProfile(profile);
+      } catch (error) {
+        console.error('사용자 정보 조회 실패:', error);
+        return null;
+      }
+    }
+
+    return profile;
+  };
+
   if ((!backendCart || backendCart.items.length === 0) && items.length === 0) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-16 text-center">
@@ -93,6 +159,20 @@ export default function Cart() {
 
   // 백엔드 장바구니 데이터를 우선 사용하고, 없으면 로컬 상태를 표시
   const cartItems: DisplayCartItem[] = backendCart && backendCart.items.length > 0 ? backendCart.items : items;
+
+  const resolvedCartTotal = (() => {
+    if (backendCart) {
+      if (backendCart.items.length > 0) {
+        return backendCart.totalPrice;
+      }
+      return 0;
+    }
+    return totalPrice;
+  })();
+
+  const vipDiscountRate = 0.1;
+  const vipDiscountAmount = isVip ? Math.round(resolvedCartTotal * vipDiscountRate) : 0;
+  const finalCartTotal = Math.max(resolvedCartTotal - vipDiscountAmount, 0);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -188,6 +268,7 @@ export default function Cart() {
                         setBackendCart(cartResponse);
                         console.log('아이템 삭제 후 백엔드 장바구니 상태:', cartResponse);
                         toast.success('아이템이 삭제되었습니다.');
+                        setStockError(null);
                       } catch (error) {
                         console.error('장바구니 아이템 삭제 실패:', error);
                         toast.error('삭제에 실패했습니다.');
@@ -250,7 +331,10 @@ export default function Cart() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    onClick={() => removeFromCart(item.id)}
+                    onClick={() => {
+                      removeFromCart(item.id);
+                      setStockError(null);
+                    }}
                   >
                     <Trash2 className="h-5 w-5 text-red-600" />
                   </Button>
@@ -262,23 +346,27 @@ export default function Cart() {
       </div>
 
       <div className="bg-gray-50 rounded-lg p-6 mb-8">
-        <div className="flex justify-between items-center text-xl">
-          <span>총 결제 금액</span>
-          <span className="text-red-600">
-            {(() => {
-              // 백엔드 장바구니가 있고 아이템이 있으면 백엔드 가격 사용
-              if (backendCart && backendCart.items.length > 0) {
-                return backendCart.totalPrice.toLocaleString();
-              }
-              // 백엔드 장바구니가 있지만 아이템이 없으면 0원
-              if (backendCart && backendCart.items.length === 0) {
-                return '0';
-              }
-              // 백엔드 장바구니가 없으면 로컬 totalPrice 사용
-              return totalPrice.toLocaleString();
-            })()}원
-          </span>
-        </div>
+        {isVip ? (
+          <div className="space-y-2 text-sm text-gray-700">
+            <div className="flex justify-between">
+              <span>상품 합계</span>
+              <span>{resolvedCartTotal.toLocaleString()}원</span>
+            </div>
+            <div className="flex justify-between text-green-600 font-semibold">
+              <span>VIP 할인 (10%)</span>
+              <span>- {vipDiscountAmount.toLocaleString()}원</span>
+            </div>
+            <div className="flex justify-between items-center text-xl pt-2 border-t border-gray-200">
+              <span>총 결제 금액</span>
+              <span className="text-red-600">{finalCartTotal.toLocaleString()}원</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-between items-center text-xl">
+            <span>총 결제 금액</span>
+            <span className="text-red-600">{finalCartTotal.toLocaleString()}원</span>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-4">
@@ -294,34 +382,77 @@ export default function Cart() {
                 return;
               }
 
+              if (!user) {
+                toast.error('로그인이 필요합니다.');
+                navigate('/login');
+                return;
+              }
+
+              const profile = await ensureCustomerProfile();
+              if (!profile) {
+                toast.error('사용자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+                return;
+              }
+
+              const receiverName = profile.name?.trim();
+              const receiverPhone = profile.phone?.trim();
+              const address = profile.address?.trim();
+
+              if (!receiverName || !receiverPhone || !address) {
+                toast.error('마이페이지에서 이름/전화번호/기본 배송지를 먼저 등록해주세요.');
+                return;
+              }
+
               setLoading(true);
 
-              // 실제 주문 생성 API 호출
               const orderId = await OrderService.placeOrder({
-                receiverName: '고객', // TODO: 실제 사용자 정보 사용
-                receiverPhone: '010-0000-0000',
-                address: '배달 주소',
+                receiverName,
+                receiverPhone,
+                address,
                 paymentMethod: 'CARD',
                 deliveryType: 'INSTANT'
               });
 
               console.log('주문 생성 완료, ID:', orderId);
 
-              // 로컬 장바구니도 비우기
               await clearCart();
+              setStockError(null);
 
               toast.success('주문이 완료되었습니다!');
               navigate('/customer/order-history');
-            } catch (error) {
+            } catch (error: any) {
               console.error('결제 실패:', error);
-              toast.error('결제에 실패했습니다. 다시 시도해주세요.');
+              let message = '결제에 실패했습니다. 다시 시도해주세요.';
+              if (typeof error.response === 'string' && error.response) {
+                try {
+                  const parsed = JSON.parse(error.response);
+                  if (parsed?.message) {
+                    message = parsed.message;
+                  } else {
+                    message = error.response;
+                  }
+                } catch {
+                  message = error.response;
+                }
+              } else if (error.message) {
+                message = error.message;
+              }
+              const shortageInfo = extractShortageInfoFromError(error) || extractShortageInfoFromError({ response: message });
+              if (shortageInfo) {
+                setStockError(shortageInfo.label);
+                registerShortage(shortageInfo);
+                message = shortageInfo.label;
+              } else {
+                setStockError(null);
+              }
+              toast.error(message);
             } finally {
               setLoading(false);
             }
           }}
-          disabled={loading}
+          disabled={loading || !!stockError}
         >
-          {loading ? '결제 중...' : '결제하기'}
+          {stockError ? stockError : loading ? '결제 중...' : '결제하기'}
         </Button>
       </div>
     </div>

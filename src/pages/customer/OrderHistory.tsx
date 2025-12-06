@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
@@ -6,6 +6,9 @@ import { Card } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { OrderService, CartService, MenuService, type Order, type MenuReference } from '../../services';
 import { toast } from 'sonner';
+import { useStock } from '../../contexts/StockContext';
+import { extractShortageInfoFromError } from '../../utils/stockUtils';
+import { getComponentDisplayName } from '../../utils/componentNames';
 
 // enum 문자열을 한글로 변환하는 함수들
 const getDinnerTypeName = (dinnerType: string): string => {
@@ -27,6 +30,94 @@ const getServingStyleName = (servingStyle: string): string => {
   return servingStyleNames[servingStyle] || servingStyle;
 };
 
+const buildAbsoluteComponentMap = (components: Array<{ componentCode: string; quantity: number }>) => {
+  return components.reduce<Record<string, number>>((acc, comp) => {
+    acc[comp.componentCode] = comp.quantity;
+    return acc;
+  }, {});
+};
+
+const buildReorderComponentModifications = (
+  dinnerType: string,
+  components: Array<{ componentCode: string; quantity: number }> | undefined,
+  menuReference: MenuReference | null
+) => {
+  const absoluteMap = buildAbsoluteComponentMap(components || []);
+  if (!menuReference) {
+    return absoluteMap;
+  }
+  const dinner = menuReference.dinnerTypes.find(d => d.code === dinnerType);
+  if (!dinner) {
+    return absoluteMap;
+  }
+  const modifications = { ...absoluteMap };
+  dinner.recipe.forEach(recipeItem => {
+    if (!(recipeItem.componentCode in modifications)) {
+      modifications[recipeItem.componentCode] = 0;
+    }
+  });
+  return modifications;
+};
+
+const buildDiffModifications = (
+  dinnerType: string,
+  absoluteMap: Record<string, number>,
+  menuReference: MenuReference | null
+) => {
+  if (!menuReference) {
+    return {};
+  }
+
+  const dinner = menuReference.dinnerTypes.find(d => d.code === dinnerType);
+  if (!dinner) {
+    return {};
+  }
+
+  const diffs: Record<string, number> = {};
+  const baseMap = dinner.recipe.reduce<Record<string, number>>((acc, recipeItem) => {
+    acc[recipeItem.componentCode] = recipeItem.quantity;
+    return acc;
+  }, {});
+
+  const codes = new Set([
+    ...Object.keys(baseMap),
+    ...Object.keys(absoluteMap)
+  ]);
+
+  codes.forEach(code => {
+    const actual = absoluteMap[code] ?? 0;
+    const base = baseMap[code] ?? 0;
+    const diff = actual - base;
+    if (diff !== 0) {
+      diffs[code] = diff;
+    }
+  });
+
+  return diffs;
+};
+
+const calculateReorderUnitPrice = (
+  dinnerType: string,
+  servingStyle: string,
+  quantity: number,
+  diffModifications: Record<string, number>,
+  menuReference: MenuReference | null,
+  fallbackAverageUnit: number
+) => {
+  if (!menuReference) {
+    return Math.round(fallbackAverageUnit / 100) * 100;
+  }
+  const totalPrice = MenuService.calculateTotalPrice(
+    dinnerType,
+    servingStyle,
+    quantity,
+    diffModifications,
+    menuReference
+  );
+  const unitPrice = quantity > 0 ? totalPrice / quantity : totalPrice;
+  return Math.round(unitPrice / 100) * 100;
+};
+
 export default function OrderHistory() {
   const navigate = useNavigate();
   const location = useLocation<{ highlightOrderId?: number }>();
@@ -35,6 +126,16 @@ export default function OrderHistory() {
   const [loading, setLoading] = useState(true);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
   const highlightOrderId = location.state?.highlightOrderId;
+  const { registerShortage } = useStock();
+  const componentStockMap = useMemo(() => {
+    if (!menuReference) {
+      return {};
+    }
+    return menuReference.componentTypes.reduce<Record<string, number>>((acc, component) => {
+      acc[component.code] = component.stock;
+      return acc;
+    }, {});
+  }, [menuReference]);
 
   // 주문 내역 및 메뉴 참조 데이터 로드
   useEffect(() => {
@@ -64,14 +165,7 @@ export default function OrderHistory() {
         setMenuReference(menuRef);
         console.log('내 주문 내역:', sortedOrders);
 
-        // 가장 최근 주문이 진행 중이면 자동으로 펼쳐서 보여주기
-        if (!highlightOrderId && sortedOrders.length > 0) {
-          const latestOrder = sortedOrders[0];
-          const activeStates = ['PAID_PENDING', 'ACCEPTED', 'COOKING', 'COOK_DONE', 'ON_DELIVERY'];
-          if (activeStates.includes(latestOrder.status)) {
-            setExpandedOrders(new Set([latestOrder.orderId.toString()]));
-          }
-        }
+        // 특정 주문 하이라이트 요청이 있을 때만 자동 펼치기 (일반적인 자동 펼치기는 제거)
       } catch (error) {
         console.error('데이터 로드 실패:', error);
         toast.error('데이터를 불러오는데 실패했습니다.');
@@ -117,9 +211,40 @@ export default function OrderHistory() {
     setExpandedOrders(newExpanded);
   };
 
+  const getOrderShortageMessage = (orderData?: Order | null) => {
+    if (!orderData || !menuReference) {
+      return null;
+    }
+
+    const usage: Record<string, number> = {};
+    orderData.items?.forEach(item => {
+      const multiplier = item.quantity ?? 1;
+      item.components?.forEach(comp => {
+        const required = (comp.quantity ?? 0) * multiplier;
+        usage[comp.componentCode] = (usage[comp.componentCode] || 0) + required;
+      });
+    });
+
+    for (const [code, required] of Object.entries(usage)) {
+      const stock = componentStockMap[code];
+      if (typeof stock === 'number' && required > stock) {
+        const displayName = getComponentDisplayName(code);
+        return `${displayName} 재고 부족 (필요 ${required}개, 보유 ${stock}개)`;
+      }
+    }
+
+    return null;
+  };
+
   // 재주문 함수
   const handleReorder = async (order: Order) => {
     console.log('🔥 재주문 버튼 클릭됨!', order.orderId);
+
+    const shortageMessage = getOrderShortageMessage(order);
+    if (shortageMessage) {
+      toast.error(shortageMessage);
+      return;
+    }
 
     if (!menuReference) {
       console.error('메뉴 참조 데이터가 없습니다:', menuReference);
@@ -142,30 +267,30 @@ export default function OrderHistory() {
         });
 
         // ComponentType enum 값들을 Record로 변환
-        const componentModifications: Record<string, number> = {};
-        item.components.forEach(comp => {
-          console.log('🔧 컴포넌트 매핑:', comp.componentCode, '->', comp.quantity);
-          componentModifications[comp.componentCode] = comp.quantity;
-        });
-
+        const componentModifications = buildReorderComponentModifications(
+          item.dinnerType,
+          item.components,
+          menuReference
+        );
         console.log('📦 최종 componentModifications:', componentModifications);
 
-        // 가격 계산
-        let calculatedPrice;
-        if (menuReference) {
-          // MenuService를 사용해서 가격 계산
-          calculatedPrice = MenuService.calculateTotalPrice(
-            item.dinnerType,
-            item.servingStyle,
-            item.quantity,
-            componentModifications,
-            menuReference
-          );
-        } else {
-          // 메뉴 참조 데이터가 없으면 임시로 총액을 아이템 개수로 나눈 값 사용
-          const itemCount = order.items.reduce((sum, orderItem) => sum + orderItem.quantity, 0);
-          calculatedPrice = Math.round((order.totalPrice / itemCount) * item.quantity);
-        }
+        const diffModifications = buildDiffModifications(
+          item.dinnerType,
+          componentModifications,
+          menuReference
+        );
+
+        // 가격 계산 (단가 기준)
+        const itemCount = order.items.reduce((sum, orderItem) => sum + orderItem.quantity, 0);
+        const averageUnit = itemCount > 0 ? order.totalPrice / itemCount : 0;
+        const calculatedPrice = calculateReorderUnitPrice(
+          item.dinnerType,
+          item.servingStyle,
+          item.quantity,
+          diffModifications,
+          menuReference,
+          averageUnit
+        );
 
         console.log(`아이템 ${item.dinnerType} - 계산된 가격: ${calculatedPrice}, 수량: ${item.quantity}`);
 
@@ -186,9 +311,25 @@ export default function OrderHistory() {
       toast.success('주문 내역이 장바구니에 추가되었습니다!');
       // 장바구니 페이지로 이동
       navigate('/customer/cart');
-    } catch (error) {
+    } catch (error: any) {
       console.error('재주문 실패:', error);
-      toast.error('재주문에 실패했습니다. 다시 시도해주세요.');
+      let message = '재주문에 실패했습니다. 다시 시도해주세요.';
+      if (typeof error?.response === 'string' && error.response) {
+        try {
+          const parsed = JSON.parse(error.response);
+          message = parsed?.message || error.response;
+        } catch {
+          message = error.response;
+        }
+      } else if (error?.message) {
+        message = error.message;
+      }
+      const shortageInfo = extractShortageInfoFromError(error) || extractShortageInfoFromError({ response: message });
+      if (shortageInfo) {
+        message = shortageInfo.label;
+        registerShortage(shortageInfo);
+      }
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -218,18 +359,21 @@ export default function OrderHistory() {
           {orders.map((order, index) => {
             // order.orderId가 undefined인 경우 안전하게 처리
             const orderId = order.orderId ?? index;
+            const shortageMessage = getOrderShortageMessage(order);
+            const firstItemName = order.items.length > 0 ? getDinnerTypeName(order.items[0].dinnerType) : '주문 상품 없음';
+            const additionalCount = Math.max(order.items.length - 1, 0);
             const isExpanded = expandedOrders.has(orderId.toString());
-            const isActive = ['PAID_PENDING', 'ACCEPTED', 'COOKING', 'COOK_DONE', 'ON_DELIVERY'].includes(order.status);
+            const completedStates = ['DELIVERED', 'CANCELLED', 'REJECTED', 'REFUNDED'];
+            const isActive = !completedStates.includes(order.status);
             const isLatest = index === 0;
-
             return (
               <Card
                 key={orderId}
                 id={`order-${orderId}`}
-                className={`p-6 ${isActive && isLatest ? 'ring-2 ring-red-500 bg-red-50' : ''}`}
+                className={`p-6 ${isActive ? 'ring-2 ring-red-500 bg-red-50' : ''}`}
               >
-                {/* 최신 진행 중 주문이면 헤더 추가 */}
-                {isActive && isLatest && (
+                {/* 진행 중인 주문이면 헤더 추가 */}
+                {isActive && (
                   <div className="mb-4 p-3 bg-red-100 rounded-lg border border-red-200">
                     <h3 className="text-red-800 font-semibold text-sm">🔥 현재 진행 중인 주문</h3>
                     <p className="text-red-600 text-xs mt-1">실시간 주문 상황을 확인하세요</p>
@@ -248,10 +392,7 @@ export default function OrderHistory() {
 
                 <div className="mb-4">
                   <p className="mb-2">
-                    {order.items.length > 0 ?
-                      `${getDinnerTypeName(order.items[0].dinnerType)} 외 ${order.items.length - 1}건` :
-                      '주문 상품 없음'
-                    }
+                    {additionalCount > 0 ? `${firstItemName} 외 ${additionalCount}건` : firstItemName}
                   </p>
                   <p className="text-xl text-red-600">{order.totalPrice.toLocaleString()}원</p>
                 </div>
@@ -293,9 +434,9 @@ export default function OrderHistory() {
                     <Button
                       className="flex-1 bg-red-600 hover:bg-red-700"
                       onClick={() => handleReorder(order)}
-                      disabled={loading}
+                      disabled={loading || !!shortageMessage}
                     >
-                      {loading ? '처리 중...' : '재주문'}
+                      {shortageMessage || (loading ? '처리 중...' : '재주문')}
                     </Button>
                   )}
                 </div>

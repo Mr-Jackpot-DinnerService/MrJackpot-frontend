@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '../../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../components/ui/dialog';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Label } from '../../components/ui/label';
 import { useCart } from '../../contexts/CartContext';
+import { useStock } from '../../contexts/StockContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { Textarea } from '../../components/ui/textarea';
 import { Plus, Minus } from 'lucide-react';
 import { MenuService, type MenuReference, type DinnerType } from '../../services';
 import { toast } from 'sonner';
+import { extractShortageInfoFromError } from '../../utils/stockUtils';
 
 // 로컬에서 사용할 MenuItem 인터페이스 (백엔드 DinnerType과 매핑)
 interface MenuItem {
@@ -63,6 +65,78 @@ export default function MenuList() {
   const [loading, setLoading] = useState(true);
   const [addingToCart, setAddingToCart] = useState(false);
   const { addToCart } = useCart();
+  const { unavailableComponents, registerShortage } = useStock();
+
+  const componentNameToCode = useMemo(() => {
+    if (!menuReference) {
+      return {};
+    }
+    return menuReference.componentTypes.reduce<Record<string, string>>((acc, component) => {
+      acc[component.description] = component.code;
+      return acc;
+    }, {});
+  }, [menuReference]);
+
+  const componentCodeToStock = useMemo(() => {
+    if (!menuReference) {
+      return {};
+    }
+    return menuReference.componentTypes.reduce<Record<string, number>>((acc, component) => {
+      acc[component.code] = component.stock;
+      return acc;
+    }, {});
+  }, [menuReference]);
+
+  const selectedMenuShortageMessage = useMemo(() => {
+    if (!selectedMenu) {
+      return null;
+    }
+
+    // 1) 실제 재고 기반 검사
+    for (const comp of selectedMenu.components) {
+      const code = componentNameToCode[comp.name];
+      if (!code) {
+        continue;
+      }
+      const stockLimit = componentCodeToStock[code];
+      if (typeof stockLimit === 'number') {
+        const perMenuQty = componentQuantities[comp.name] ?? comp.defaultQuantity;
+        const totalNeeded = perMenuQty * quantity;
+        if (totalNeeded > stockLimit) {
+          if (stockLimit <= 0) {
+            return `${comp.name} 재고가 부족합니다. (잔여: 0개)`;
+          }
+          return `${comp.name}은(는) 총 ${stockLimit}개까지만 주문할 수 있습니다.`;
+        }
+      }
+    }
+
+    // 2) 에러 기반 (백엔드 응답) 검사 - 추가 안전장치
+    for (const comp of selectedMenu.components) {
+      const code = componentNameToCode[comp.name];
+      if (!code) {
+        continue;
+      }
+      const shortage = unavailableComponents[code];
+      if (!shortage) {
+        continue;
+      }
+      const currentQty = componentQuantities[comp.name] ?? comp.defaultQuantity;
+      const availableQty = typeof shortage.available === 'number' ? shortage.available : null;
+      if (availableQty === null) {
+        continue;
+      }
+      const totalNeeded = currentQty * quantity;
+      if (totalNeeded > availableQty) {
+        if (availableQty <= 0) {
+          return shortage.label || `${shortage.displayName}의 재고가 부족합니다.`;
+        }
+        return `${shortage.displayName}은(는) 최대 ${availableQty}개까지 선택할 수 있습니다.`;
+      }
+    }
+
+    return null;
+  }, [selectedMenu, componentNameToCode, componentCodeToStock, componentQuantities, quantity, unavailableComponents]);
 
   // 메뉴 데이터 로드
   useEffect(() => {
@@ -212,7 +286,7 @@ export default function MenuList() {
       const unitPrice = Math.round(roundedTotalPrice / quantity / 100) * 100; // 단위 가격도 100원 단위로 반올림
 
       try {
-        addToCart({
+        await addToCart({
           menuId: selectedMenu.id,
           name: selectedMenu.name,
           price: unitPrice,
@@ -230,7 +304,23 @@ export default function MenuList() {
         setSelectedMenu(null);
       } catch (error) {
         console.error('장바구니 추가 중 오류:', error);
-        toast.error('장바구니 추가에 실패했습니다.');
+        let message = '장바구니 추가에 실패했습니다.';
+        if (typeof error?.response === 'string' && error.response) {
+          try {
+            const parsed = JSON.parse(error.response);
+            message = parsed?.message || error.response;
+          } catch {
+            message = error.response;
+          }
+        } else if (error?.message) {
+          message = error.message;
+        }
+        const shortageInfo = extractShortageInfoFromError(error) || extractShortageInfoFromError({ response: message });
+        if (shortageInfo) {
+          message = shortageInfo.label;
+          registerShortage(shortageInfo);
+        }
+        toast.error(message);
       } finally {
         setAddingToCart(false);
       }
@@ -399,9 +489,9 @@ export default function MenuList() {
                 <Button
                   className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                   onClick={handleAddToCart}
-                  disabled={isAllComponentsZero() || addingToCart}
+                  disabled={isAllComponentsZero() || addingToCart || !!selectedMenuShortageMessage}
                 >
-                  {addingToCart ? '추가 중...' : '장바구니에 추가'}
+                  {selectedMenuShortageMessage || (addingToCart ? '추가 중...' : '장바구니에 추가')}
                 </Button>
               </DialogFooter>
             </>

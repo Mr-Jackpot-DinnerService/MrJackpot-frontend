@@ -23,12 +23,9 @@ export default function MyPage() {
       try {
         setLoading(true);
         const orders = await OrderService.getMyOrders();
-        // 모든 주문 횟수 (취소/거절된 주문 제외)
-        const validOrders = orders.filter(order =>
-          !['CANCELLED', 'REJECTED', 'REFUNDED'].includes(order.status)
-        );
-        setOrderCount(validOrders.length);
-        console.log('유효한 주문 횟수:', validOrders.length);
+        const completedOrders = orders.filter(order => order.status === 'DELIVERED');
+        setOrderCount(completedOrders.length);
+        console.log('완료된 주문 횟수:', completedOrders.length);
       } catch (error) {
         console.error('주문 내역 로드 실패:', error);
         setOrderCount(0);

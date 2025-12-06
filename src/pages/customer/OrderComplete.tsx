@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom';
 import { CheckCircle } from 'lucide-react';
 import { Button } from '../../components/ui/button';
+import { useState } from 'react';
 
 export default function OrderComplete() {
-  const orderNumber = 'ORD' + Date.now().toString().slice(-8);
+  const [orderNumber] = useState(() => 'ORD' + Date.now().toString().slice(-8));
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-16 text-center">

@@ -142,7 +142,7 @@ export interface UserAddress {
 export interface AddressRequest {
   addressName: string;
   address: string;
-  isDefault?: boolean;
+  isDefault: boolean;
 }
 
 export interface UpdateAddressRequest {

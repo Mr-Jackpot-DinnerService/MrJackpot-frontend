@@ -7,8 +7,19 @@ export class CartService {
     try {
       const response = await apiClient.get<CartResponse>('/cart');
       return response;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch cart:', error);
+
+      // 404나 장바구니가 없는 경우 빈 장바구니 반환
+      if (error?.response?.status === 404 || error?.response?.status === 400) {
+        console.log('Cart not found, returning empty cart');
+        return {
+          cartId: 0,
+          totalPrice: 0,
+          items: []
+        };
+      }
+
       throw error;
     }
   }

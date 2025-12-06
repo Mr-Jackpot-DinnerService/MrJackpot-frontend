@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               }
 
               setUser(parsedUser);
-            } catch (apiError) {
+            } catch {
               console.warn('[AuthContext] API 호출 실패 - 자동 로그아웃');
               AuthService.logout();
               localStorage.removeItem('user');

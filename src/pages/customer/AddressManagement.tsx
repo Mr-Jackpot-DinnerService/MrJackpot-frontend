@@ -5,7 +5,6 @@ import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Checkbox } from '../../components/ui/checkbox';
 import { useAuth } from '../../contexts/AuthContext';
 import { AddressService, type UserAddress } from '../../services';
 import { toast } from 'sonner';
@@ -13,7 +12,6 @@ import { toast } from 'sonner';
 const initialFormState = {
   name: '',
   address: '',
-  setAsDefault: false,
 };
 
 export default function AddressManagement() {
@@ -99,24 +97,20 @@ export default function AddressManagement() {
       return;
     }
 
-    const isEditingDefault = editingAddress?.isDefault ?? false;
-    const shouldSetDefault = !isEditingDefault && (
-      newAddress.setAsDefault ||
-      (!editingAddress && addresses.length === 0)
-    );
+    // 첫 번째 주소는 자동으로 기본 배송지로 설정
+    const shouldSetDefault = !editingAddress && addresses.length === 0;
 
     try {
       setSubmitting(true);
+
       if (editingAddress) {
         await AddressService.updateAddress(editingAddress.id, {
           addressName: newAddress.name.trim(),
           address: newAddress.address.trim(),
         });
-        if (shouldSetDefault) {
-          await AddressService.setDefaultAddress(editingAddress.id);
-        }
         toast.success('배송지가 수정되었습니다.');
       } else {
+        // 새 배송지 추가 - 첫 번째 주소만 기본으로 설정
         await AddressService.addAddress({
           addressName: newAddress.name.trim(),
           address: newAddress.address.trim(),
@@ -125,9 +119,11 @@ export default function AddressManagement() {
         toast.success('배송지가 추가되었습니다.');
       }
 
-      const updated = await loadAddresses();
+      // 최종 주소 목록 로드
+      const finalAddresses = await loadAddresses();
+
       if (shouldSetDefault) {
-        const currentDefault = updated.find(addr => addr.isDefault);
+        const currentDefault = finalAddresses.find(addr => addr.isDefault);
         if (currentDefault) {
           await updateProfile({ address: currentDefault.address });
         }
@@ -156,7 +152,6 @@ export default function AddressManagement() {
     setNewAddress({
       name: address.addressName,
       address: address.address,
-      setAsDefault: false,
     });
   };
 
@@ -306,21 +301,6 @@ export default function AddressManagement() {
               />
             </div>
 
-            {(!(editingAddress && editingAddress.isDefault)) && (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="setAsDefault"
-                  checked={newAddress.setAsDefault}
-                  onCheckedChange={checked => setNewAddress({
-                    ...newAddress,
-                    setAsDefault: checked === true,
-                  })}
-                />
-                <Label htmlFor="setAsDefault" className="text-sm text-gray-600 cursor-pointer">
-                  이 주소를 기본 배송지로 설정
-                </Label>
-              </div>
-            )}
 
             <div className="flex gap-4 pt-4">
               <Button

@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useMemo } from 'react';
-import { Bike, Store, MapPin, Utensils, Mic } from 'lucide-react';
+import { MapPin, Utensils, Mic } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useStock } from '../contexts/StockContext';
 import Header from '../components/layout/Header';
@@ -31,18 +31,8 @@ const getDinnerTypeName = (dinnerType: string): string => {
   return dinnerTypeNames[dinnerType] || dinnerType;
 };
 
-const getServingStyleName = (servingStyle: string): string => {
-  const servingStyleNames: Record<string, string> = {
-    'SIMPLE': '심플',
-    'GRAND': '그랜드',
-    'DELUXE': '디럭스'
-  };
-  return servingStyleNames[servingStyle] || servingStyle;
-};
-
 // 주문 데이터를 표시용으로 변환하는 함수
 const convertOrderToDisplay = (order: Order) => {
-  const firstItem = order.items[0];
   const itemNames = order.items.map(item => getDinnerTypeName(item.dinnerType));
 
   return {

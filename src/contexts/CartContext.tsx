@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { CartService, type CartItemRequest, type CartResponse, type BackendCartItem } from '../services';
+import { CartService, type CartItemRequest } from '../services';
 import { ApiError } from '../services/api';
 import { useAuth } from './AuthContext';
 

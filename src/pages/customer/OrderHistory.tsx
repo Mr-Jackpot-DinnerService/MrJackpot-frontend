@@ -8,7 +8,6 @@ import { OrderService, CartService, MenuService, type Order, type MenuReference 
 import { toast } from 'sonner';
 import { useStock } from '../../contexts/StockContext';
 import { extractShortageInfoFromError } from '../../utils/stockUtils';
-import { getComponentDisplayName } from '../../utils/componentNames';
 
 // enum 문자열을 한글로 변환하는 함수들
 const getDinnerTypeName = (dinnerType: string): string => {
@@ -28,6 +27,111 @@ const getServingStyleName = (servingStyle: string): string => {
     'DELUXE': '디럭스'
   };
   return servingStyleNames[servingStyle] || servingStyle;
+};
+
+const getComponentDisplayName = (componentCode: string): string => {
+  const componentNames: Record<string, string> = {
+    'STEAK': '스테이크',
+    'WINE': '와인',
+    'COFFEE': '커피',
+    'SALAD': '샐러드',
+    'SCRAMBLED_EGG': '에그 스크램블',
+    'BACON': '베이컨',
+    'BREAD': '빵',
+    'BAGUETTE': '바게트빵',
+    'CHAMPAGNE': '샴페인',
+    'PLASTIC_PLATE': '플라스틱 접시',
+    'CERAMIC_PLATE': '도자기 접시',
+    'CUPID_PLATE': '큐피드 접시',
+    'PLASTIC_CUP': '플라스틱 컵',
+    'CERAMIC_CUP': '도자기 컵',
+    'PLASTIC_WINE_GLASS': '플라스틱 와인잔',
+    'GLASS_WINE_GLASS': '유리 와인잔',
+    'PAPER_NAPKIN': '종이 냅킨',
+    'COTTON_NAPKIN': '면 냅킨',
+    'LINEN_NAPKIN': '린넨 냅킨',
+    'PLASTIC_TRAY': '플라스틱 쟁반',
+    'WOODEN_TRAY': '나무 쟁반',
+    'FLOWER_VASE': '꽃병'
+  };
+  return componentNames[componentCode] || componentCode;
+};
+
+// 메뉴별 가격 계산 (할인 전 정가) - MenuService 사용
+const calculateItemPrice = (
+  dinnerType: string,
+  servingStyle: string,
+  quantity: number,
+  components: Array<{ componentCode: string; quantity: number }> | undefined,
+  menuReference: MenuReference | null
+): number => {
+  if (!menuReference || !components) {
+    return 0;
+  }
+
+  // 기본 레시피 대비 차이 계산
+  const diffModifications = buildDiffModifications(dinnerType, components, menuReference);
+
+  // MenuService의 기존 계산 로직 사용
+  return MenuService.calculateTotalPrice(
+    dinnerType,
+    servingStyle,
+    quantity,
+    diffModifications,
+    menuReference
+  );
+};
+
+// 기본 레시피와의 차이 계산
+const buildDiffModifications = (
+  dinnerType: string,
+  components: Array<{ componentCode: string; quantity: number }>,
+  menuReference: MenuReference | null
+): Record<string, number> => {
+  if (!menuReference) {
+    return {};
+  }
+
+  const dinner = menuReference.dinnerTypes.find(d => d.code === dinnerType);
+  if (!dinner) {
+    return {};
+  }
+
+  // 실제 구성을 Record로 변환
+  const actualComponents = components.reduce<Record<string, number>>((acc, comp) => {
+    acc[comp.componentCode] = comp.quantity;
+    return acc;
+  }, {});
+
+  // 기본 레시피를 Record로 변환
+  const baseComponents = dinner.recipe.reduce<Record<string, number>>((acc, recipeItem) => {
+    acc[recipeItem.componentCode] = recipeItem.quantity;
+    return acc;
+  }, {});
+
+  // 차이 계산
+  const diffs: Record<string, number> = {};
+  const allCodes = new Set([
+    ...Object.keys(baseComponents),
+    ...Object.keys(actualComponents)
+  ]);
+
+  allCodes.forEach(code => {
+    const actual = actualComponents[code] ?? 0;
+    const base = baseComponents[code] ?? 0;
+    const diff = actual - base;
+    if (diff !== 0) {
+      diffs[code] = diff;
+    }
+  });
+
+  return diffs;
+};
+
+// 할인 여부 감지
+const isDiscountApplied = (originalPrice: number, paidPrice: number): boolean => {
+  const discountedPrice = Math.round(originalPrice * 0.9);
+  return Math.abs(paidPrice - discountedPrice) < Math.abs(paidPrice - originalPrice);
 };
 
 const buildAbsoluteComponentMap = (components: Array<{ componentCode: string; quantity: number }>) => {
@@ -59,43 +163,6 @@ const buildReorderComponentModifications = (
   return modifications;
 };
 
-const buildDiffModifications = (
-  dinnerType: string,
-  absoluteMap: Record<string, number>,
-  menuReference: MenuReference | null
-) => {
-  if (!menuReference) {
-    return {};
-  }
-
-  const dinner = menuReference.dinnerTypes.find(d => d.code === dinnerType);
-  if (!dinner) {
-    return {};
-  }
-
-  const diffs: Record<string, number> = {};
-  const baseMap = dinner.recipe.reduce<Record<string, number>>((acc, recipeItem) => {
-    acc[recipeItem.componentCode] = recipeItem.quantity;
-    return acc;
-  }, {});
-
-  const codes = new Set([
-    ...Object.keys(baseMap),
-    ...Object.keys(absoluteMap)
-  ]);
-
-  codes.forEach(code => {
-    const actual = absoluteMap[code] ?? 0;
-    const base = baseMap[code] ?? 0;
-    const diff = actual - base;
-    if (diff !== 0) {
-      diffs[code] = diff;
-    }
-  });
-
-  return diffs;
-};
-
 const calculateReorderUnitPrice = (
   dinnerType: string,
   servingStyle: string,
@@ -125,6 +192,7 @@ export default function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
   const highlightOrderId = location.state?.highlightOrderId;
   const { registerShortage } = useStock();
   const componentStockMap = useMemo(() => {
@@ -209,6 +277,41 @@ export default function OrderHistory() {
       newExpanded.add(orderIdStr);
     }
     setExpandedOrders(newExpanded);
+  };
+
+  // 주문 취소 함수
+  const handleCancelOrder = async (orderId: number) => {
+    if (!confirm('정말로 주문을 취소하시겠습니까?')) {
+      return;
+    }
+
+    const reason = prompt('취소 사유를 입력해주세요:');
+    if (!reason) {
+      return;
+    }
+
+    try {
+      setCancellingOrderId(orderId);
+      await OrderService.cancelOrder(orderId, { reason });
+
+      // 주문 상태를 로컬에서 업데이트
+      setOrders(prev =>
+        prev.map(order =>
+          order.orderId === orderId ? { ...order, status: 'CANCELLED' } : order
+        )
+      );
+
+      toast.success('주문이 취소되었습니다.');
+    } catch (error: any) {
+      console.error('주문 취소 실패:', error);
+      let message = '주문 취소에 실패했습니다. 다시 시도해주세요.';
+      if (error?.message) {
+        message = error.message;
+      }
+      toast.error(message);
+    } finally {
+      setCancellingOrderId(null);
+    }
   };
 
   const getOrderShortageMessage = (orderData?: Order | null) => {
@@ -399,15 +502,82 @@ export default function OrderHistory() {
 
                 {isExpanded && (
                   <div className="border-t pt-4 mb-4">
-                    <h3 className="mb-2">주문 상세</h3>
-                    <div className="space-y-2">
-                      {order.items.map((item, index) => (
-                        <div key={index} className="text-sm">
-                          <span>
-                            {getDinnerTypeName(item.dinnerType)} ({getServingStyleName(item.servingStyle)}) x {item.quantity}
-                          </span>
-                        </div>
-                      ))}
+                    <h3 className="mb-3 font-medium">주문 상세</h3>
+                    <div className="space-y-4">
+                      {order.items.map((item, index) => {
+                        const itemPrice = calculateItemPrice(
+                          item.dinnerType,
+                          item.servingStyle,
+                          item.quantity,
+                          item.components,
+                          menuReference
+                        );
+                        return (
+                          <div key={index} className="border rounded-lg p-3 bg-gray-50">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="text-sm font-medium text-gray-800">
+                                {getDinnerTypeName(item.dinnerType)} ({getServingStyleName(item.servingStyle)}) x {item.quantity}
+                              </div>
+                              {itemPrice > 0 && (
+                                <div className="text-sm text-right">
+                                  <div className="text-gray-600">메뉴 가격</div>
+                                  <div className="font-medium text-gray-800">{itemPrice.toLocaleString()}원</div>
+                                </div>
+                              )}
+                            </div>
+                            {item.components && item.components.length > 0 && (
+                              <div className="mt-2">
+                                <p className="text-xs text-gray-500 mb-2">구성:</p>
+                                <div className="grid grid-cols-2 gap-1">
+                                  {item.components.map((comp, compIndex) => (
+                                    <p key={compIndex} className="text-xs text-gray-600">
+                                      • {getComponentDisplayName(comp.componentCode)} x{comp.quantity}
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* 전체 주문 가격 요약 */}
+                      {(() => {
+                        const totalOriginalPrice = order.items.reduce((sum, item) => {
+                          return sum + calculateItemPrice(
+                            item.dinnerType,
+                            item.servingStyle,
+                            item.quantity,
+                            item.components,
+                            menuReference
+                          );
+                        }, 0);
+
+                        const hasDiscount = isDiscountApplied(totalOriginalPrice, order.totalPrice);
+
+                        return totalOriginalPrice > 0 ? (
+                          <div className="border-t pt-3 mt-4">
+                            <div className="text-sm space-y-1">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">메뉴 총 가격:</span>
+                                <span className={hasDiscount ? "line-through text-gray-500" : "font-medium"}>{totalOriginalPrice.toLocaleString()}원</span>
+                              </div>
+                              {hasDiscount && (
+                                <>
+                                  <div className="flex justify-between">
+                                    <span className="text-green-600">10% 할인:</span>
+                                    <span className="text-green-600">-{(totalOriginalPrice * 0.1).toLocaleString()}원</span>
+                                  </div>
+                                  <div className="flex justify-between font-medium text-lg">
+                                    <span>결제 금액:</span>
+                                    <span className="text-red-600">{order.totalPrice.toLocaleString()}원</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 )}
@@ -430,6 +600,16 @@ export default function OrderHistory() {
                       </>
                     )}
                   </Button>
+                  {order.status === 'PAID_PENDING' && (
+                    <Button
+                      variant="outline"
+                      className="flex-1 border-red-600 text-red-600 hover:bg-red-50"
+                      onClick={() => handleCancelOrder(order.orderId)}
+                      disabled={cancellingOrderId === order.orderId}
+                    >
+                      {cancellingOrderId === order.orderId ? '취소 중...' : '주문 취소'}
+                    </Button>
+                  )}
                   {order.status === 'DELIVERED' && (
                     <Button
                       className="flex-1 bg-red-600 hover:bg-red-700"

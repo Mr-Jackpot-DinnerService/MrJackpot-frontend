@@ -122,7 +122,7 @@ export interface CancelOrderRequest {
 
 // 직원 관리 관련 타입
 export interface UpdateOrderStatusRequest {
-  newStatus: 'PENDING' | 'COOKING' | 'DELIVERING' | 'COMPLETED';
+  newStatus: 'PAID_PENDING' | 'ACCEPTED' | 'COOKING' | 'COOK_DONE' | 'ON_DELIVERY' | 'DELIVERED' | 'CANCELLED' | 'REJECTED' | 'REFUNDED';
 }
 
 export interface StockResponse {

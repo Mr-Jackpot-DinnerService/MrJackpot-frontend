@@ -1,98 +1,179 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, MapPin, Trash2, Check } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { Checkbox } from '../../components/ui/checkbox';
+import { useAuth } from '../../contexts/AuthContext';
+import { AddressService, type UserAddress } from '../../services';
 import { toast } from 'sonner';
 
-interface Address {
-  id: string;
-  name: string;
-  recipient: string;
-  phone: string;
-  address: string;
-  detailAddress: string;
-  isDefault: boolean;
-}
-
-const MOCK_ADDRESSES: Address[] = [
-  {
-    id: '1',
-    name: '우리집',
-    recipient: '김대박',
-    phone: '010-1234-5678',
-    address: '서울시 강남구 테헤란로 123',
-    detailAddress: '대박아파트 101동 101호',
-    isDefault: true,
-  },
-  {
-    id: '2',
-    name: '회사',
-    recipient: '김대박',
-    phone: '010-1234-5678',
-    address: '서울시 서초구 서초대로 456',
-    detailAddress: '대박빌딩 5층',
-    isDefault: false,
-  },
-];
+const initialFormState = {
+  name: '',
+  address: '',
+  setAsDefault: false,
+};
 
 export default function AddressManagement() {
   const navigate = useNavigate();
-  const [addresses, setAddresses] = useState<Address[]>(MOCK_ADDRESSES);
+  const { user, updateProfile } = useAuth();
+  const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-  
-  // New address form state
-  const [newAddress, setNewAddress] = useState({
-    name: '',
-    recipient: '',
-    phone: '',
-    address: '',
-    detailAddress: '',
-  });
+  const [editingAddress, setEditingAddress] = useState<UserAddress | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [actionTarget, setActionTarget] = useState<number | null>(null);
+  const [newAddress, setNewAddress] = useState(initialFormState);
+  const resetForm = () => setNewAddress(initialFormState);
 
-  const handleSetDefault = (id: string) => {
-    setAddresses(addresses.map(addr => ({
-      ...addr,
-      isDefault: addr.id === id
-    })));
-    toast.success('기본 배송지가 변경되었습니다.');
+  const loadAddresses = useCallback(async () => {
+    try {
+      const data = await AddressService.getAddresses();
+      setAddresses(data);
+      return data;
+    } catch (error) {
+      console.error('배송지 조회 실패:', error);
+      toast.error('배송지를 불러오는데 실패했습니다.');
+      return [];
+    }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
+    loadAddresses()
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadAddresses]);
+
+  const handleSetDefault = async (address: UserAddress) => {
+    try {
+      setActionTarget(address.id);
+      await AddressService.setDefaultAddress(address.id);
+      toast.success('기본 배송지가 변경되었습니다.');
+      const updated = await loadAddresses();
+      const currentDefault = updated.find(addr => addr.isDefault);
+      if (currentDefault) {
+        await updateProfile({ address: currentDefault.address });
+      }
+    } catch (error) {
+      console.error('기본 배송지 설정 실패:', error);
+      toast.error('기본 배송지 설정에 실패했습니다.');
+    } finally {
+      setActionTarget(null);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    const addrToDelete = addresses.find(a => a.id === id);
-    if (addrToDelete?.isDefault) {
+  const handleDelete = async (address: UserAddress) => {
+    if (address.isDefault) {
       toast.error('기본 배송지는 삭제할 수 없습니다.');
       return;
     }
-    setAddresses(addresses.filter(addr => addr.id !== id));
-    toast.success('배송지가 삭제되었습니다.');
+    try {
+      setActionTarget(address.id);
+      await AddressService.deleteAddress(address.id);
+      toast.success('배송지가 삭제되었습니다.');
+      await loadAddresses();
+    } catch (error) {
+      console.error('배송지 삭제 실패:', error);
+      toast.error('배송지 삭제에 실패했습니다.');
+    } finally {
+      setActionTarget(null);
+    }
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const newAddr: Address = {
-      id: Date.now().toString(),
-      ...newAddress,
-      isDefault: addresses.length === 0, // If it's the first address, make it default
-    };
 
-    setAddresses([...addresses, newAddr]);
+    if (!newAddress.name.trim() || !newAddress.address.trim()) {
+      toast.error('배송지 이름과 주소를 입력해주세요.');
+      return;
+    }
+
+    const isEditingDefault = editingAddress?.isDefault ?? false;
+    const shouldSetDefault = !isEditingDefault && (
+      newAddress.setAsDefault ||
+      (!editingAddress && addresses.length === 0)
+    );
+
+    try {
+      setSubmitting(true);
+      if (editingAddress) {
+        await AddressService.updateAddress(editingAddress.id, {
+          addressName: newAddress.name.trim(),
+          address: newAddress.address.trim(),
+        });
+        if (shouldSetDefault) {
+          await AddressService.setDefaultAddress(editingAddress.id);
+        }
+        toast.success('배송지가 수정되었습니다.');
+      } else {
+        await AddressService.addAddress({
+          addressName: newAddress.name.trim(),
+          address: newAddress.address.trim(),
+          isDefault: shouldSetDefault,
+        });
+        toast.success('배송지가 추가되었습니다.');
+      }
+
+      const updated = await loadAddresses();
+      if (shouldSetDefault) {
+        const currentDefault = updated.find(addr => addr.isDefault);
+        if (currentDefault) {
+          await updateProfile({ address: currentDefault.address });
+        }
+      }
+      handleCancelForm();
+    } catch (error) {
+      console.error('배송지 저장 실패:', error);
+      toast.error('배송지 저장에 실패했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const defaultAddress = addresses.find(a => a.isDefault) || null;
+  const otherAddresses = addresses.filter(a => !a.isDefault);
+
+  const handleCancelForm = () => {
+    resetForm();
+    setIsAdding(false);
+    setEditingAddress(null);
+  };
+
+  const openEditForm = (address: UserAddress) => {
+    setEditingAddress(address);
     setIsAdding(false);
     setNewAddress({
-      name: '',
-      recipient: '',
-      phone: '',
-      address: '',
-      detailAddress: '',
+      name: address.addressName,
+      address: address.address,
+      setAsDefault: false,
     });
-    toast.success('배송지가 추가되었습니다.');
   };
 
-  const defaultAddress = addresses.find(a => a.isDefault);
-  const otherAddresses = addresses.filter(a => !a.isDefault);
+  const openAddForm = () => {
+    setEditingAddress(null);
+    resetForm();
+    setIsAdding(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+        <h1 className="text-3xl mb-4">배송지 관리</h1>
+        <p className="text-gray-600">배송지를 불러오는 중입니다...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -103,23 +184,31 @@ export default function AddressManagement() {
         <h1 className="text-3xl font-bold">배송지 관리</h1>
       </div>
 
-      {!isAdding ? (
+      {!(isAdding || editingAddress) ? (
         <div className="space-y-8">
           {/* Default Address Section */}
           <section>
             <h2 className="text-xl font-semibold mb-4 text-gray-800">기본 배송지</h2>
             {defaultAddress ? (
               <Card className="p-6 border-red-200 bg-red-50">
-                <div className="flex justify-between items-start">
+                <div className="space-y-4">
                   <div>
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="font-bold text-lg">{defaultAddress.name}</span>
+                      <span className="font-bold text-lg">{defaultAddress.addressName}</span>
                       <span className="text-xs bg-red-600 text-white px-2 py-1 rounded-full">기본</span>
                     </div>
-                    <p className="text-gray-600 mb-1">{defaultAddress.recipient} / {defaultAddress.phone}</p>
-                    <p className="text-gray-800">{defaultAddress.address} {defaultAddress.detailAddress}</p>
+                    <p className="text-gray-800">{defaultAddress.address}</p>
                   </div>
-                  <MapPin className="text-red-600 w-6 h-6" />
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openEditForm(defaultAddress)}
+                      className="text-sm"
+                    >
+                      수정
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ) : (
@@ -133,7 +222,7 @@ export default function AddressManagement() {
           <section>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-800">다른 배송지</h2>
-              <Button onClick={() => setIsAdding(true)} className="flex items-center gap-2">
+              <Button onClick={openAddForm} className="flex items-center gap-2">
                 <Plus className="w-4 h-4" />
                 배송지 추가
               </Button>
@@ -145,16 +234,24 @@ export default function AddressManagement() {
                   <Card key={addr.id} className="p-6 hover:border-red-200 transition-colors">
                     <div className="flex justify-between items-start">
                       <div>
-                        <div className="font-bold text-lg mb-2">{addr.name}</div>
-                        <p className="text-gray-600 mb-1">{addr.recipient} / {addr.phone}</p>
-                        <p className="text-gray-800 mb-4">{addr.address} {addr.detailAddress}</p>
-                        
+                        <div className="font-bold text-lg mb-2">{addr.addressName}</div>
+                        <p className="text-gray-800 mb-4">{addr.address}</p>
+
                         <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditForm(addr)}
+                            className="text-sm"
+                          >
+                            수정
+                          </Button>
                           <Button 
                             variant="outline" 
                             size="sm" 
-                            onClick={() => handleSetDefault(addr.id)}
+                            onClick={() => handleSetDefault(addr)}
                             className="text-sm"
+                            disabled={actionTarget === addr.id}
                           >
                             <Check className="w-4 h-4 mr-1" />
                             기본 배송지로 설정
@@ -162,8 +259,9 @@ export default function AddressManagement() {
                           <Button 
                             variant="outline" 
                             size="sm" 
-                            onClick={() => handleDelete(addr.id)}
+                            onClick={() => handleDelete(addr)}
                             className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                            disabled={actionTarget === addr.id}
                           >
                             <Trash2 className="w-4 h-4 mr-1" />
                             삭제
@@ -184,8 +282,8 @@ export default function AddressManagement() {
       ) : (
         /* Add Address Form */
         <Card className="max-w-2xl mx-auto p-6">
-          <h2 className="text-2xl font-bold mb-6">새 배송지 추가</h2>
-          <form onSubmit={handleAddSubmit} className="space-y-6">
+          <h2 className="text-2xl font-bold mb-6">{editingAddress ? '배송지 수정' : '새 배송지 추가'}</h2>
+          <form onSubmit={handleFormSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="name">배송지 이름 (예: 회사, 본가)</Label>
               <Input
@@ -197,29 +295,6 @@ export default function AddressManagement() {
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="recipient">받는 분</Label>
-                <Input
-                  id="recipient"
-                  required
-                  value={newAddress.recipient}
-                  onChange={e => setNewAddress({...newAddress, recipient: e.target.value})}
-                  placeholder="이름"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">연락처</Label>
-                <Input
-                  id="phone"
-                  required
-                  value={newAddress.phone}
-                  onChange={e => setNewAddress({...newAddress, phone: e.target.value})}
-                  placeholder="010-0000-0000"
-                />
-              </div>
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="address">주소</Label>
               <Input
@@ -228,23 +303,36 @@ export default function AddressManagement() {
                 value={newAddress.address}
                 onChange={e => setNewAddress({...newAddress, address: e.target.value})}
                 placeholder="주소를 입력하세요"
-                className="mb-2"
-              />
-              <Input
-                id="detailAddress"
-                required
-                value={newAddress.detailAddress}
-                onChange={e => setNewAddress({...newAddress, detailAddress: e.target.value})}
-                placeholder="상세 주소를 입력하세요"
               />
             </div>
 
+            {(!(editingAddress && editingAddress.isDefault)) && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="setAsDefault"
+                  checked={newAddress.setAsDefault}
+                  onCheckedChange={checked => setNewAddress({
+                    ...newAddress,
+                    setAsDefault: checked === true,
+                  })}
+                />
+                <Label htmlFor="setAsDefault" className="text-sm text-gray-600 cursor-pointer">
+                  이 주소를 기본 배송지로 설정
+                </Label>
+              </div>
+            )}
+
             <div className="flex gap-4 pt-4">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setIsAdding(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={handleCancelForm}
+              >
                 취소
               </Button>
-              <Button type="submit" className="flex-1 bg-red-600 hover:bg-red-700">
-                저장하기
+              <Button type="submit" className="flex-1 bg-red-600 hover:bg-red-700" disabled={submitting}>
+                {submitting ? '저장 중...' : (editingAddress ? '수정 완료' : '저장하기')}
               </Button>
             </div>
           </form>

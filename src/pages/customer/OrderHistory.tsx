@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
@@ -29,10 +29,12 @@ const getServingStyleName = (servingStyle: string): string => {
 
 export default function OrderHistory() {
   const navigate = useNavigate();
+  const location = useLocation<{ highlightOrderId?: number }>();
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
+  const highlightOrderId = location.state?.highlightOrderId;
 
   // 주문 내역 및 메뉴 참조 데이터 로드
   useEffect(() => {
@@ -63,7 +65,7 @@ export default function OrderHistory() {
         console.log('내 주문 내역:', sortedOrders);
 
         // 가장 최근 주문이 진행 중이면 자동으로 펼쳐서 보여주기
-        if (sortedOrders.length > 0) {
+        if (!highlightOrderId && sortedOrders.length > 0) {
           const latestOrder = sortedOrders[0];
           const activeStates = ['PAID_PENDING', 'ACCEPTED', 'COOKING', 'COOK_DONE', 'ON_DELIVERY'];
           if (activeStates.includes(latestOrder.status)) {
@@ -82,6 +84,27 @@ export default function OrderHistory() {
 
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!highlightOrderId || loading || orders.length === 0) {
+      return;
+    }
+    const highlightIdStr = highlightOrderId.toString();
+    const targetExists = orders.some(order => order.orderId?.toString() === highlightIdStr);
+    if (!targetExists) {
+      return;
+    }
+    setExpandedOrders(new Set([highlightIdStr]));
+    const timer = setTimeout(() => {
+      const target = document.getElementById(`order-${highlightIdStr}`);
+      if (target) {
+        const offset = 80;
+        const top = Math.max(target.getBoundingClientRect().top + window.scrollY - offset, 0);
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [highlightOrderId, loading, orders]);
 
   const toggleOrder = (orderId: number | string) => {
     const orderIdStr = orderId.toString();
@@ -202,6 +225,7 @@ export default function OrderHistory() {
             return (
               <Card
                 key={orderId}
+                id={`order-${orderId}`}
                 className={`p-6 ${isActive && isLatest ? 'ring-2 ring-red-500 bg-red-50' : ''}`}
               >
                 {/* 최신 진행 중 주문이면 헤더 추가 */}

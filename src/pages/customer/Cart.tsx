@@ -1,17 +1,60 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
-import { useCart } from '../../contexts/CartContext';
+import { useCart, type CartItem } from '../../contexts/CartContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { useState, useEffect } from 'react';
 import { CartService, OrderService, type CartResponse } from '../../services';
 import { toast } from 'sonner';
+
+type DisplayCartItem = CartResponse['items'][number] | CartItem;
 
 export default function Cart() {
   const navigate = useNavigate();
   const { items, removeFromCart, removeFromCartBackend, updateQuantity, totalPrice, clearCart } = useCart();
   const [backendCart, setBackendCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const refreshBackendCart = async () => {
+    const cartResponse = await CartService.getCart();
+    setBackendCart(cartResponse);
+    return cartResponse;
+  };
+
+  const handleBackendQuantityChange = async (cartMenuId: number, newQuantity: number) => {
+    try {
+      if (newQuantity <= 0) {
+        await removeFromCartBackend(cartMenuId);
+      } else {
+        await CartService.updateQuantity(cartMenuId, newQuantity);
+        await refreshBackendCart();
+      }
+      toast.success('수량이 변경되었습니다.');
+    } catch (error) {
+      console.error('백엔드 수량 변경 실패:', error);
+      toast.error('수량 변경에 실패했습니다.');
+    }
+  };
+
+  const handleLocalQuantityChange = async (itemId: string, newQuantity: number) => {
+    try {
+      const cartMenuId = Number(itemId);
+      if (!Number.isNaN(cartMenuId)) {
+        await handleBackendQuantityChange(cartMenuId, newQuantity);
+        return;
+      }
+    } catch (error) {
+      console.error('로컬 아이템 백엔드 연동 실패:', error);
+    }
+
+    if (newQuantity <= 0) {
+      removeFromCart(itemId);
+      return;
+    }
+
+    updateQuantity(itemId, newQuantity);
+    toast.success('수량이 변경되었습니다.');
+  };
 
   // 백엔드에서 장바구니 데이터 로드
   useEffect(() => {
@@ -48,8 +91,8 @@ export default function Cart() {
     );
   }
 
-  // 백엔드 장바구니 데이터를 우선 사용 (항상 백엔드 데이터만 사용)
-  const cartItems = backendCart?.items || [];
+  // 백엔드 장바구니 데이터를 우선 사용하고, 없으면 로컬 상태를 표시
+  const cartItems: DisplayCartItem[] = backendCart && backendCart.items.length > 0 ? backendCart.items : items;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -102,61 +145,37 @@ export default function Cart() {
                     </div>
                   )}
 
-                  <p className="text-red-600 font-semibold">{(item.pricePerUnit * item.quantity).toLocaleString()}원</p>
                   <p className="text-sm text-gray-500">단가: {item.pricePerUnit.toLocaleString()}원</p>
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          const newQuantity = item.quantity - 1;
-                          if (newQuantity <= 0) {
-                            // 수량이 0이 되면 아이템 삭제
-                            await removeFromCartBackend(item.cartMenuId);
-                          } else {
-                            await CartService.updateQuantity(item.cartMenuId, newQuantity);
-                          }
-
-                          // 백엔드 장바구니 다시 로드
-                          const cartResponse = await CartService.getCart();
-                          setBackendCart(cartResponse);
-                          toast.success('수량이 변경되었습니다.');
-                        } catch (error) {
-                          console.error('수량 감소 실패:', error);
-                          toast.error('수량 변경에 실패했습니다.');
-                        }
-                      }}
-                    >
-                      -
-                    </Button>
-                    <span className="w-12 text-center">{item.quantity}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          const newQuantity = item.quantity + 1;
-                          await CartService.updateQuantity(item.cartMenuId, newQuantity);
-
-                          // 백엔드 장바구니 다시 로드
-                          const cartResponse = await CartService.getCart();
-                          setBackendCart(cartResponse);
-                          toast.success('수량이 변경되었습니다.');
-                        } catch (error) {
-                          console.error('수량 증가 실패:', error);
-                          toast.error('수량 변경에 실패했습니다.');
-                        }
-                      }}
-                    >
-                      +
-                    </Button>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleBackendQuantityChange(item.cartMenuId, item.quantity - 1)}
+                      >
+                        -
+                      </Button>
+                      <span className="w-12 text-center">{item.quantity}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleBackendQuantityChange(item.cartMenuId, item.quantity + 1)}
+                      >
+                        +
+                      </Button>
+                    </div>
+                    <div className="text-center mt-2">
+                      <p className="text-red-600 font-semibold">{(item.pricePerUnit * item.quantity).toLocaleString()}원</p>
+                    </div>
                   </div>
 
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     onClick={async () => {
@@ -198,29 +217,37 @@ export default function Cart() {
                   {item.request && (
                     <p className="text-sm text-blue-600 mb-2">요청사항: {item.request}</p>
                   )}
-                  <p className="text-red-600">{item.price.toLocaleString()}원</p>
+                  <p className="text-sm text-gray-500">단가: {item.price.toLocaleString()}원</p>
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                    >
-                      -
-                    </Button>
-                    <span className="w-12 text-center">{item.quantity}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                    >
-                      +
-                    </Button>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleLocalQuantityChange(item.id, item.quantity - 1)}
+                      >
+                        -
+                      </Button>
+                      <span className="w-12 text-center">{item.quantity}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleLocalQuantityChange(item.id, item.quantity + 1)}
+                      >
+                        +
+                      </Button>
+                    </div>
+                    <div className="text-center mt-2">
+                      <p className="text-red-600">{(item.price * item.quantity).toLocaleString()}원</p>
+                    </div>
                   </div>
 
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => removeFromCart(item.id)}

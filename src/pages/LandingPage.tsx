@@ -190,14 +190,18 @@ export default function LandingPage() {
       <main className="flex-1">
         {/* Address Alert */}
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="bg-white border rounded-lg p-4">
-            <div className="flex items-center justify-center gap-2 text-center">
+          <button
+            type="button"
+            onClick={() => navigate('/customer/address-management')}
+            className="bg-white border rounded-lg p-4 w-full text-left hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-center gap-2 text-center text-gray-700">
               <MapPin className="h-4 w-4 text-red-600 flex-shrink-0" />
-              <span className="text-gray-700">
+              <span>
                 {!user ? "로그인을 해 주세요." : (user.address || "기본 주소를 등록해 주세요.")}
               </span>
             </div>
-          </div>
+          </button>
         </div>
 
         {/* Order Type Buttons */}
@@ -262,7 +266,10 @@ export default function LandingPage() {
                     <CarouselContent>
                       {recentOrders.map((order) => (
                         <CarouselItem key={order.id} className="md:basis-1/2 lg:basis-1/4">
-                          <Card className="border hover:shadow-md transition-shadow cursor-pointer h-full">
+                          <Card
+                            className="border hover:shadow-md transition-shadow cursor-pointer h-full"
+                            onClick={() => navigate('/customer/order-history', { state: { highlightOrderId: order.id } })}
+                          >
                             <CardContent className="p-4">
                               <div className="aspect-video relative mb-3 rounded-md overflow-hidden">
                                 <ImageWithFallback
@@ -285,7 +292,10 @@ export default function LandingPage() {
                               <Button
                                 variant="outline"
                                 className="w-full mt-3 text-xs h-8"
-                                onClick={() => handleReorder(order)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleReorder(order);
+                                }}
                                 disabled={loadingOrders}
                               >
                                 {loadingOrders ? '처리 중...' : '재주문'}

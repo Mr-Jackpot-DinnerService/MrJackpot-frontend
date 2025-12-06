@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { AuthService, type AuthResponse } from '../services';
+import { AuthService, UserService, type AuthResponse } from '../services';
 
 interface User {
   id: number;
@@ -23,7 +23,7 @@ interface AuthContextType {
     phone: string;
     address?: string;
   }) => Promise<void>;
-  updateProfile: (data: Partial<User>) => void;
+  updateProfile: (data: Partial<User>) => Promise<void>;
   loading: boolean;
   redirectToDashboard: () => void;
 }
@@ -176,9 +176,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateProfile = (data: Partial<User>) => {
-    if (user) {
-      setUser({ ...user, ...data });
+  const updateProfile = async (data: Partial<User>) => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      let updatedUser = { ...user, ...data };
+
+      if (data.name !== undefined || data.phone !== undefined) {
+        const response = await UserService.updateProfile({
+          name: data.name ?? user.name,
+          phone: data.phone ?? user.phone,
+        });
+
+        updatedUser = {
+          ...updatedUser,
+          name: response.name,
+          phone: response.phone,
+          email: response.email,
+          address: response.address,
+        };
+      }
+
+      setUser(updatedUser);
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+    } catch (error) {
+      console.error('Profile update failed:', error);
+      throw error;
     }
   };
 

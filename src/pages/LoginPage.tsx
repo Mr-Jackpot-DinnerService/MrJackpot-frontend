@@ -11,6 +11,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [localLoading, setLocalLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { login, user, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -27,19 +28,39 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      toast.error('아이디와 비밀번호를 입력해주세요.');
+    const trimmedUsername = username.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedUsername || !trimmedPassword) {
+      const msg = '아이디와 비밀번호를 모두 입력해주세요.';
+      setErrorMessage(msg);
+      toast.error(msg);
       return;
     }
 
     setLocalLoading(true);
     try {
-      await login(username, password);
+      await login(trimmedUsername, trimmedPassword);
       toast.success('로그인이 완료되었습니다.');
+      setErrorMessage(null);
       // 네비게이션은 useEffect에서 처리
     } catch (error: any) {
       console.error('Login failed:', error);
-      toast.error(error.message || '로그인에 실패했습니다. 아이디와 비밀번호를 확인해주세요.');
+      let message = error.message || '로그인에 실패했습니다. 아이디와 비밀번호를 확인해주세요.';
+      if (typeof error.response === 'string' && error.response) {
+        try {
+          const parsed = JSON.parse(error.response);
+          if (parsed?.message) {
+            message = parsed.message;
+          } else {
+            message = error.response;
+          }
+        } catch {
+          message = error.response;
+        }
+      }
+      setErrorMessage(message);
+      toast.error(message);
     } finally {
       setLocalLoading(false);
     }
@@ -56,7 +77,7 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white rounded-lg shadow-md p-8">
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4" noValidate>
             <div className="mb-6">
               <h2 className="text-xl font-semibold text-center">로그인</h2>
               <p className="text-sm text-gray-600 text-center mt-2">고객 및 직원 모두 사용 가능</p>
@@ -69,7 +90,6 @@ export default function LoginPage() {
                 placeholder="아이디를 입력해주세요"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                required
                 disabled={loading || localLoading}
               />
             </div>
@@ -82,7 +102,6 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 disabled={loading || localLoading}
               />
             </div>
@@ -90,6 +109,10 @@ export default function LoginPage() {
             <Button type="submit" className="w-full bg-red-600 hover:bg-red-700" disabled={loading || localLoading}>
               {loading || localLoading ? '로그인 중...' : '로그인'}
             </Button>
+
+            {errorMessage && (
+              <p className="text-sm text-red-600 text-center">{errorMessage}</p>
+            )}
 
             <div className="text-center">
               <Link to="/signup" className="text-sm text-red-600 hover:underline">

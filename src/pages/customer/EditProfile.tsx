@@ -4,6 +4,8 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
+import { UserService } from '../../services';
 
 export default function EditProfile() {
   const { user, updateProfile } = useAuth();
@@ -11,14 +13,29 @@ export default function EditProfile() {
   const [formData, setFormData] = useState({
     name: user?.name || '',
     phone: user?.phone || '',
-    address: user?.address || '',
   });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateProfile(formData);
-    alert('정보가 수정되었습니다.');
-    navigate('/customer/mypage');
+    try {
+      await updateProfile({
+        name: formData.name,
+        phone: formData.phone,
+      });
+      toast.success('정보가 수정되었습니다.');
+      navigate('/customer/mypage');
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      toast.error('정보 수정에 실패했습니다. 다시 시도해주세요.');
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -26,6 +43,82 @@ export default function EditProfile() {
       ...prev,
       [e.target.name]: e.target.value,
     }));
+  };
+
+  const handlePasswordInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setPasswordForm(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+    setPasswordError(null);
+    setPasswordSuccess(null);
+  };
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const showError = (message: string) => {
+      setPasswordSuccess(null);
+      setPasswordError(message);
+      toast.error(message);
+    };
+
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      showError('모든 비밀번호 입력란을 채워주세요.');
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      showError('새 비밀번호는 6자 이상이어야 합니다.');
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      showError('새 비밀번호와 확인 비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    if (passwordForm.newPassword === passwordForm.currentPassword) {
+      showError('새 비밀번호는 기존 비밀번호와 달라야 합니다.');
+      return;
+    }
+
+    try {
+      setPasswordSubmitting(true);
+      await UserService.changePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      toast.success('비밀번호가 변경되었습니다.');
+      setPasswordError(null);
+      setPasswordSuccess('비밀번호가 정상적으로 변경되었습니다.');
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      });
+    } catch (error: any) {
+      console.error('Failed to change password:', error);
+      let serverMessage = error.message ?? '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인해 주세요.';
+      if (typeof error.response === 'string' && error.response) {
+        try {
+          const parsed = JSON.parse(error.response);
+          if (parsed?.message) {
+            serverMessage = parsed.message;
+          } else {
+            serverMessage = error.response;
+          }
+        } catch {
+          serverMessage = error.response;
+        }
+      }
+      setPasswordSuccess(null);
+      setPasswordError(serverMessage);
+      toast.error(serverMessage);
+    } finally {
+      setPasswordSubmitting(false);
+    }
   };
 
   return (
@@ -59,16 +152,6 @@ export default function EditProfile() {
             />
           </div>
 
-          <div>
-            <Label htmlFor="address">주소</Label>
-            <Input
-              id="address"
-              name="address"
-              value={formData.address}
-              onChange={handleChange}
-            />
-          </div>
-
           <div className="flex gap-4 pt-4">
             <Button
               type="button"
@@ -86,21 +169,51 @@ export default function EditProfile() {
 
         <div className="border-t mt-6 pt-6">
           <h3 className="mb-4">비밀번호 변경</h3>
-          <div className="space-y-4">
+          <form className="space-y-4" onSubmit={handlePasswordSubmit}>
             <div>
               <Label htmlFor="currentPassword">현재 비밀번호</Label>
-              <Input id="currentPassword" type="password" />
+              <Input
+                id="currentPassword"
+                name="currentPassword"
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={handlePasswordInputChange}
+              />
             </div>
             <div>
               <Label htmlFor="newPassword">새 비밀번호</Label>
-              <Input id="newPassword" type="password" />
+              <Input
+                id="newPassword"
+                name="newPassword"
+                type="password"
+                value={passwordForm.newPassword}
+                onChange={handlePasswordInputChange}
+              />
             </div>
             <div>
-              <Label htmlFor="confirmNewPassword">새 비밀번호 확인</Label>
-              <Input id="confirmNewPassword" type="password" />
+              <Label htmlFor="confirmPassword">새 비밀번호 확인</Label>
+              <Input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                value={passwordForm.confirmPassword}
+                onChange={handlePasswordInputChange}
+              />
             </div>
-            <Button className="w-full bg-red-600 hover:bg-red-700">비밀번호 변경</Button>
-          </div>
+            <Button
+              type="submit"
+              className="w-full bg-red-600 hover:bg-red-700"
+              disabled={passwordSubmitting}
+            >
+              {passwordSubmitting ? '변경 중...' : '비밀번호 변경'}
+            </Button>
+            {passwordError && (
+              <p className="text-sm text-red-600">{passwordError}</p>
+            )}
+            {passwordSuccess && (
+              <p className="text-sm text-green-600">{passwordSuccess}</p>
+            )}
+          </form>
         </div>
       </div>
     </div>

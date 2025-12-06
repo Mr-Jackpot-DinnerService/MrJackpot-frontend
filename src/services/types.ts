@@ -130,3 +130,43 @@ export interface StockResponse {
   componentName: string;
   quantity: number;
 }
+
+// 배송지 관련 타입
+export interface UserAddress {
+  id: number;
+  addressName: string;
+  address: string;
+  isDefault: boolean;
+}
+
+export interface AddressRequest {
+  addressName: string;
+  address: string;
+  isDefault?: boolean;
+}
+
+export interface UpdateAddressRequest {
+  addressName: string;
+  address: string;
+}
+
+// 사용자 프로필 관련 타입
+export interface UpdateUserProfileRequest {
+  name: string;
+  phone: string;
+}
+
+export interface UserProfile {
+  id: number;
+  username: string;
+  name: string;
+  email: string;
+  phone: string;
+  address?: string;
+  role: 'CUSTOMER' | 'KITCHEN_STAFF' | 'DELIVERY_STAFF';
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}

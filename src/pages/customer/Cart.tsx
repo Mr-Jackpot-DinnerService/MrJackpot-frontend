@@ -5,10 +5,11 @@ import { useCart, type CartItem } from '../../contexts/CartContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useStock } from '../../contexts/StockContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
-import { useState, useEffect } from 'react';
-import { CartService, OrderService, UserService, type CartResponse, type UserProfile } from '../../services';
+import { useState, useEffect, useCallback } from 'react';
+import { CartService, OrderService, UserService, MenuService, type CartResponse, type UserProfile, type MenuReference } from '../../services';
 import { toast } from 'sonner';
 import { extractShortageInfoFromError } from '../../utils/stockUtils';
+import { getComponentDisplayName } from '../../utils/componentNames';
 
 type DisplayCartItem = CartResponse['items'][number] | CartItem;
 
@@ -22,6 +23,8 @@ export default function Cart() {
   const [isVip, setIsVip] = useState(false);
   const [customerProfile, setCustomerProfile] = useState<UserProfile | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
+  const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ show: boolean; cartMenuId: number | null }>({ show: false, cartMenuId: null });
 
   const refreshBackendCart = async () => {
     const cartResponse = await CartService.getCart();
@@ -29,15 +32,58 @@ export default function Cart() {
     return cartResponse;
   };
 
-  const handleBackendQuantityChange = async (cartMenuId: number, newQuantity: number) => {
+  // 재고 검증 함수
+  const validateStock = useCallback((cart: CartResponse, menuRef: MenuReference): string | null => {
+    // 각 구성품별로 필요한 총 수량 계산
+    const requiredComponents: Record<string, number> = {};
+
+    cart.items.forEach(item => {
+      item.components.forEach(comp => {
+        const totalNeeded = comp.quantity * item.quantity;
+        requiredComponents[comp.componentCode] =
+          (requiredComponents[comp.componentCode] || 0) + totalNeeded;
+      });
+    });
+
+    // 재고와 비교
+    for (const [componentCode, requiredQty] of Object.entries(requiredComponents)) {
+      const componentType = menuRef.componentTypes.find(ct => ct.code === componentCode);
+      if (componentType && componentType.stock < requiredQty) {
+        const displayName = getComponentDisplayName(componentCode);
+        return `${displayName}의 재고가 부족합니다. (필요: ${requiredQty}, 재고: ${componentType.stock})`;
+      }
+    }
+
+    return null;
+  }, []);
+
+  const handleBackendQuantityChange = async (cartMenuId: number, newQuantity: number, currentQuantity: number) => {
     try {
+      // 수량이 1에서 0으로 줄어드는 경우 확인 모달 표시
+      if (currentQuantity === 1 && newQuantity === 0) {
+        setDeleteConfirmModal({ show: true, cartMenuId });
+        return;
+      }
+
       if (newQuantity <= 0) {
         await removeFromCartBackend(cartMenuId);
       } else {
         await CartService.updateQuantity(cartMenuId, newQuantity);
-        await refreshBackendCart();
       }
-      setStockError(null);
+
+      // 장바구니 새로고침 및 재고 검증
+      const updatedCart = await refreshBackendCart();
+      if (menuReference && updatedCart.items.length > 0) {
+        const error = validateStock(updatedCart, menuReference);
+        setStockError(error);
+        if (error) {
+          toast.error(error);
+          return;
+        }
+      } else {
+        setStockError(null);
+      }
+
       toast.success('수량이 변경되었습니다.');
     } catch (error) {
       console.error('백엔드 수량 변경 실패:', error);
@@ -45,11 +91,39 @@ export default function Cart() {
     }
   };
 
-  const handleLocalQuantityChange = async (itemId: string, newQuantity: number) => {
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmModal.cartMenuId) return;
+
+    try {
+      await removeFromCartBackend(deleteConfirmModal.cartMenuId);
+
+      // 장바구니 새로고침 및 재고 검증
+      const updatedCart = await refreshBackendCart();
+      if (menuReference && updatedCart.items.length > 0) {
+        const error = validateStock(updatedCart, menuReference);
+        setStockError(error);
+      } else {
+        setStockError(null);
+      }
+
+      toast.success('아이템이 삭제되었습니다.');
+    } catch (error) {
+      console.error('백엔드 아이템 삭제 실패:', error);
+      toast.error('삭제에 실패했습니다.');
+    } finally {
+      setDeleteConfirmModal({ show: false, cartMenuId: null });
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteConfirmModal({ show: false, cartMenuId: null });
+  };
+
+  const handleLocalQuantityChange = async (itemId: string, newQuantity: number, currentQuantity: number) => {
     try {
       const cartMenuId = Number(itemId);
       if (!Number.isNaN(cartMenuId)) {
-        await handleBackendQuantityChange(cartMenuId, newQuantity);
+        await handleBackendQuantityChange(cartMenuId, newQuantity, currentQuantity);
         return;
       }
     } catch (error) {
@@ -67,17 +141,34 @@ export default function Cart() {
     toast.success('수량이 변경되었습니다.');
   };
 
-  // 백엔드에서 장바구니 데이터 로드
+  // 백엔드에서 장바구니 데이터 및 메뉴 참조 데이터 로드
   useEffect(() => {
     const loadCartData = async () => {
       try {
         setLoading(true);
-        const cartData = await CartService.getCart();
+
+        // 장바구니와 메뉴 참조 데이터 병렬로 로드
+        const [cartData, menuRef] = await Promise.all([
+          CartService.getCart(),
+          MenuService.getMenuReferences()
+        ]);
+
         setBackendCart(cartData);
+        setMenuReference(menuRef);
+
         console.log('백엔드 장바구니 데이터:', JSON.stringify(cartData, null, 2));
         console.log('백엔드 아이템 개수:', cartData?.items?.length || 0);
         if (cartData?.items?.[0]) {
           console.log('첫 번째 아이템 상세:', JSON.stringify(cartData.items[0], null, 2));
+        }
+
+        // 재고 검증
+        if (cartData.items.length > 0) {
+          const error = validateStock(cartData, menuRef);
+          setStockError(error);
+          if (error) {
+            toast.warning(error);
+          }
         }
       } catch (error) {
         console.error('장바구니 데이터 로드 실패:', error);
@@ -88,6 +179,7 @@ export default function Cart() {
     };
 
     loadCartData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -235,7 +327,7 @@ export default function Cart() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleBackendQuantityChange(item.cartMenuId, item.quantity - 1)}
+                        onClick={() => handleBackendQuantityChange(item.cartMenuId, item.quantity - 1, item.quantity)}
                       >
                         -
                       </Button>
@@ -244,7 +336,7 @@ export default function Cart() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleBackendQuantityChange(item.cartMenuId, item.quantity + 1)}
+                        onClick={() => handleBackendQuantityChange(item.cartMenuId, item.quantity + 1, item.quantity)}
                       >
                         +
                       </Button>
@@ -267,8 +359,16 @@ export default function Cart() {
                         const cartResponse = await CartService.getCart();
                         setBackendCart(cartResponse);
                         console.log('아이템 삭제 후 백엔드 장바구니 상태:', cartResponse);
+
+                        // 재고 재검증
+                        if (menuReference && cartResponse.items.length > 0) {
+                          const error = validateStock(cartResponse, menuReference);
+                          setStockError(error);
+                        } else {
+                          setStockError(null);
+                        }
+
                         toast.success('아이템이 삭제되었습니다.');
-                        setStockError(null);
                       } catch (error) {
                         console.error('장바구니 아이템 삭제 실패:', error);
                         toast.error('삭제에 실패했습니다.');
@@ -308,7 +408,7 @@ export default function Cart() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleLocalQuantityChange(item.id, item.quantity - 1)}
+                        onClick={() => handleLocalQuantityChange(item.id, item.quantity - 1, item.quantity)}
                       >
                         -
                       </Button>
@@ -317,7 +417,7 @@ export default function Cart() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleLocalQuantityChange(item.id, item.quantity + 1)}
+                        onClick={() => handleLocalQuantityChange(item.id, item.quantity + 1, item.quantity)}
                       >
                         +
                       </Button>
@@ -374,7 +474,7 @@ export default function Cart() {
           <Button variant="outline" className="w-full">계속 쇼핑하기</Button>
         </Link>
         <Button
-          className="flex-1 bg-red-600 hover:bg-red-700"
+          className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           onClick={async () => {
             try {
               if (items.length === 0 && (!backendCart || backendCart.items.length === 0)) {
@@ -455,6 +555,31 @@ export default function Cart() {
           {stockError ? stockError : loading ? '결제 중...' : '결제하기'}
         </Button>
       </div>
+
+      {/* 삭제 확인 모달 */}
+      {deleteConfirmModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">메뉴 삭제</h3>
+            <p className="text-gray-600 mb-6">해당 메뉴를 장바구니에서 삭제하시겠어요?</p>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleCancelDelete}
+              >
+                아니요
+              </Button>
+              <Button
+                className="flex-1 bg-red-600 hover:bg-red-700"
+                onClick={handleConfirmDelete}
+              >
+                네
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

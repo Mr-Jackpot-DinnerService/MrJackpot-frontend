@@ -6,7 +6,6 @@ import { Label } from '../../components/ui/label';
 import { useCart } from '../../contexts/CartContext';
 import { useStock } from '../../contexts/StockContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
-import { Textarea } from '../../components/ui/textarea';
 import { Plus, Minus } from 'lucide-react';
 import { MenuService, type MenuReference, type DinnerType } from '../../services';
 import { toast } from 'sonner';
@@ -58,7 +57,6 @@ export default function MenuList() {
   const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [quantity, setQuantity] = useState(1);
-  const [request, setRequest] = useState('');
   const [componentQuantities, setComponentQuantities] = useState<Record<string, number>>({});
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
@@ -188,7 +186,6 @@ export default function MenuList() {
     }
     setSelectedOptions(menu.options.length > 0 ? [defaultOption] : []);
     setQuantity(1);
-    setRequest('');
   };
 
   const handleQuantityChange = (componentName: string, change: number) => {
@@ -257,7 +254,6 @@ export default function MenuList() {
       setAddingToCart(true);
       // 구성 변경 내용 정리
       const modifications: Record<string, number> = {};
-      const changes: string[] = [];
 
       selectedMenu.components.forEach(comp => {
         const currentQty = componentQuantities[comp.name] !== undefined ? componentQuantities[comp.name] : comp.defaultQuantity;
@@ -266,15 +262,8 @@ export default function MenuList() {
           // 절대 수량을 전송 (차이값이 아닌)
           console.log(`컴포넌트: ${comp.name} -> 코드: ${componentType.code}, 현재 수량: ${currentQty} (기본: ${comp.defaultQuantity})`);
           modifications[componentType.code] = currentQty;
-
-          if (currentQty !== comp.defaultQuantity) {
-            changes.push(`${comp.name}: ${currentQty}개 (기본 ${comp.defaultQuantity}개)`);
-          }
         }
       });
-
-      const changesText = changes.length > 0 ? `[구성 변경] ${changes.join(', ')}` : '';
-      const fullRequest = [changesText, request].filter(Boolean).join('\n');
 
       // 서빙 스타일 코드 찾기
       const servingStyleCode = selectedOptions.length > 0 ?
@@ -293,7 +282,6 @@ export default function MenuList() {
           quantity,
           options: selectedOptions,
           image: selectedMenu.image,
-          request: fullRequest.trim() || undefined,
           // API 연결을 위한 추가 정보
           dinnerType: selectedMenu.id,
           servingStyle: servingStyleCode,
@@ -445,15 +433,6 @@ export default function MenuList() {
                       </div>
                     ))}
                   </div>
-                </div>
-
-                <div>
-                  <Label className="mb-2 block font-semibold">요청사항</Label>
-                  <Textarea 
-                    placeholder="예: 알러지가 있으니 주의해주세요"
-                    value={request}
-                    onChange={(e) => setRequest(e.target.value)}
-                  />
                 </div>
 
                 <div className="flex items-center gap-4 pt-4 border-t">

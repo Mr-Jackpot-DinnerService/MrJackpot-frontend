@@ -10,8 +10,66 @@ import { CartService, OrderService, UserService, MenuService, type CartResponse,
 import { toast } from 'sonner';
 import { extractShortageInfoFromError } from '../../utils/stockUtils';
 import { getComponentDisplayName } from '../../utils/componentNames';
+import { getDinnerImageSrc } from '../../utils/menuImages';
 
 type DisplayCartItem = CartResponse['items'][number] | CartItem;
+
+const dinnerTypeNames: Record<string, string> = {
+  VALENTINE_DINNER: '발렌타인 디너',
+  FRENCH_DINNER: '프랑스식 디너',
+  ENGLISH_DINNER: '영국식 디너',
+  CHAMP_FEAST_DINNER: '샴페인 축제 디너'
+};
+
+const servingStyleNames: Record<string, string> = {
+  SIMPLE: '심플',
+  GRAND: '그랜드',
+  DELUXE: '디럭스'
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const getDinnerTypeInfo = (dinnerType: unknown) => {
+  if (typeof dinnerType === 'string') {
+    return {
+      code: dinnerType,
+      name: dinnerTypeNames[dinnerType] || dinnerType
+    };
+  }
+
+  if (isRecord(dinnerType)) {
+    const code = typeof dinnerType.code === 'string' ? dinnerType.code : '';
+    const description = typeof dinnerType.description === 'string' ? dinnerType.description : '';
+
+    return {
+      code,
+      name: description || (code ? dinnerTypeNames[code] || code : '메뉴')
+    };
+  }
+
+  return {
+    code: '',
+    name: '메뉴'
+  };
+};
+
+const getServingStyleName = (servingStyle: unknown) => {
+  if (typeof servingStyle === 'string') {
+    return servingStyleNames[servingStyle] || servingStyle;
+  }
+
+  if (isRecord(servingStyle)) {
+    if (typeof servingStyle.description === 'string') {
+      return servingStyle.description;
+    }
+    if (typeof servingStyle.code === 'string') {
+      return servingStyleNames[servingStyle.code] || servingStyle.code;
+    }
+  }
+
+  return '서빙 스타일';
+};
 
 export default function Cart() {
   const { user } = useAuth();
@@ -25,11 +83,72 @@ export default function Cart() {
   const [stockError, setStockError] = useState<string | null>(null);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ show: boolean; cartMenuId: number | null }>({ show: false, cartMenuId: null });
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CARD' | 'CASH' | null>(null);
+  const [paymentCompleted, setPaymentCompleted] = useState(false);
 
   const refreshBackendCart = async () => {
     const cartResponse = await CartService.getCart();
     setBackendCart(cartResponse);
     return cartResponse;
+  };
+
+  const handleProceedPayment = async () => {
+    if (!selectedPaymentMethod) {
+      toast.error('결제 수단을 선택해주세요.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const profile = await ensureCustomerProfile();
+      if (!profile) {
+        toast.error('사용자 정보를 불러오지 못했습니다.');
+        return;
+      }
+
+      const receiverName = profile.name?.trim();
+      const receiverPhone = profile.phone?.trim();
+      const address = profile.address?.trim();
+
+      if (!receiverName || !receiverPhone || !address) {
+        toast.error('마이페이지에서 이름/전화번호/기본 배송지를 먼저 등록해주세요.');
+        return;
+      }
+
+      // 백엔드 장바구니로 주문 생성
+      await OrderService.placeOrder({
+        receiverName,
+        receiverPhone,
+        address,
+        paymentMethod: selectedPaymentMethod,
+        deliveryType: 'INSTANT',
+      });
+
+      // 결제 완료 상태로 전환
+      setPaymentCompleted(true);
+
+      // 3초 후 주문 내역 페이지로 이동
+      setTimeout(() => {
+        clearCart();
+        setBackendCart(null);
+        navigate('/customer/order-history');
+      }, 3000);
+    } catch (error) {
+      setPaymentCompleted(false);
+      console.error('결제 실패:', error);
+
+      const shortageInfo = extractShortageInfoFromError(error);
+      if (shortageInfo) {
+        registerShortage(shortageInfo);
+        toast.error(shortageInfo.label);
+      } else {
+        toast.error('결제에 실패했습니다. 다시 시도해주세요.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   // 재고 검증 함수
@@ -38,11 +157,26 @@ export default function Cart() {
     const requiredComponents: Record<string, number> = {};
 
     cart.items.forEach(item => {
+      // 음식 재료 계산
       item.components.forEach(comp => {
         const totalNeeded = comp.quantity * item.quantity;
         requiredComponents[comp.componentCode] =
           (requiredComponents[comp.componentCode] || 0) + totalNeeded;
       });
+
+      // ServingStyle의 tableware 계산
+      const servingStyleCode = typeof item.servingStyle === 'string'
+        ? item.servingStyle
+        : (item.servingStyle as any).code;
+
+      const servingStyle = menuRef.servingStyles.find(ss => ss.code === servingStyleCode);
+      if (servingStyle && servingStyle.tableware) {
+        servingStyle.tableware.forEach(tableware => {
+          const totalNeeded = tableware.quantity * item.quantity;
+          requiredComponents[tableware.componentCode] =
+            (requiredComponents[tableware.componentCode] || 0) + totalNeeded;
+        });
+      }
     });
 
     // 재고와 비교
@@ -291,17 +425,20 @@ export default function Cart() {
               'DELUXE': '디럭스'
             };
 
-            const dinnerName = dinnerTypeNames[String(item.dinnerType)] || String(item.dinnerType);
-            const styleName = servingStyleNames[String(item.servingStyle)] || String(item.servingStyle);
+            const dinnerTypeInfo = getDinnerTypeInfo(item.dinnerType);
+            const styleName = getServingStyleName(item.servingStyle);
+            const dinnerImage = getDinnerImageSrc(dinnerTypeInfo.code);
 
             return (
               <div key={item.cartMenuId} className="bg-white border rounded-lg p-4 flex gap-4">
-                <div className="w-24 h-24 bg-gray-200 rounded flex items-center justify-center">
-                  <span className="text-gray-500 text-xs">이미지</span>
-                </div>
+                <img
+                  src={dinnerImage}
+                  alt={dinnerTypeInfo.name}
+                  className="w-24 h-24 object-cover rounded"
+                />
 
                 <div className="flex-1">
-                  <h3 className="mb-1 font-semibold">{dinnerName}</h3>
+                  <h3 className="mb-1 font-semibold">{dinnerTypeInfo.name}</h3>
                   <p className="text-sm text-gray-600 mb-2">서빙 스타일: {styleName}</p>
 
                   {/* 구성 재료 표시 */}
@@ -476,79 +613,35 @@ export default function Cart() {
         <Button
           className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           onClick={async () => {
-            try {
-              if (items.length === 0 && (!backendCart || backendCart.items.length === 0)) {
-                toast.error('장바구니가 비어있습니다.');
-                return;
-              }
-
-              if (!user) {
-                toast.error('로그인이 필요합니다.');
-                navigate('/login');
-                return;
-              }
-
-              const profile = await ensureCustomerProfile();
-              if (!profile) {
-                toast.error('사용자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
-                return;
-              }
-
-              const receiverName = profile.name?.trim();
-              const receiverPhone = profile.phone?.trim();
-              const address = profile.address?.trim();
-
-              if (!receiverName || !receiverPhone || !address) {
-                toast.error('마이페이지에서 이름/전화번호/기본 배송지를 먼저 등록해주세요.');
-                return;
-              }
-
-              setLoading(true);
-
-              const orderId = await OrderService.placeOrder({
-                receiverName,
-                receiverPhone,
-                address,
-                paymentMethod: 'CARD',
-                deliveryType: 'INSTANT'
-              });
-
-              console.log('주문 생성 완료, ID:', orderId);
-
-              await clearCart();
-              setStockError(null);
-
-              toast.success('주문이 완료되었습니다!');
-              navigate('/customer/order-history');
-            } catch (error: any) {
-              console.error('결제 실패:', error);
-              let message = '결제에 실패했습니다. 다시 시도해주세요.';
-              if (typeof error.response === 'string' && error.response) {
-                try {
-                  const parsed = JSON.parse(error.response);
-                  if (parsed?.message) {
-                    message = parsed.message;
-                  } else {
-                    message = error.response;
-                  }
-                } catch {
-                  message = error.response;
-                }
-              } else if (error.message) {
-                message = error.message;
-              }
-              const shortageInfo = extractShortageInfoFromError(error) || extractShortageInfoFromError({ response: message });
-              if (shortageInfo) {
-                setStockError(shortageInfo.label);
-                registerShortage(shortageInfo);
-                message = shortageInfo.label;
-              } else {
-                setStockError(null);
-              }
-              toast.error(message);
-            } finally {
-              setLoading(false);
+            // 결제 전 검증
+            if (items.length === 0 && (!backendCart || backendCart.items.length === 0)) {
+              toast.error('장바구니가 비어있습니다.');
+              return;
             }
+
+            if (!user) {
+              toast.error('로그인이 필요합니다.');
+              navigate('/login');
+              return;
+            }
+
+            const profile = await ensureCustomerProfile();
+            if (!profile) {
+              toast.error('사용자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+              return;
+            }
+
+            const receiverName = profile.name?.trim();
+            const receiverPhone = profile.phone?.trim();
+            const address = profile.address?.trim();
+
+            if (!receiverName || !receiverPhone || !address) {
+              toast.error('마이페이지에서 이름/전화번호/기본 배송지를 먼저 등록해주세요.');
+              return;
+            }
+
+            // 검증 통과 시 결제 수단 선택 모달 열기
+            setShowPaymentModal(true);
           }}
           disabled={loading || !!stockError}
         >
@@ -577,6 +670,106 @@ export default function Cart() {
                 네
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 결제 수단 선택 모달 */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            {paymentCompleted ? (
+              // 결제 완료 화면
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h3 className="text-2xl font-bold mb-2">결제완료</h3>
+                <p className="text-gray-600">주문 내역으로 이동합니다...</p>
+              </div>
+            ) : (
+              // 결제 수단 선택 화면
+              <>
+                <h3 className="text-xl font-semibold mb-6">결제 수단 선택</h3>
+
+                <div className="space-y-3 mb-6">
+                  {/* 카드 결제 옵션 */}
+                  <div
+                    className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                      selectedPaymentMethod === 'CARD'
+                        ? 'border-red-500 bg-red-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setSelectedPaymentMethod('CARD')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        selectedPaymentMethod === 'CARD'
+                          ? 'border-red-500'
+                          : 'border-gray-300'
+                      }`}>
+                        {selectedPaymentMethod === 'CARD' && (
+                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold mb-1">카드 결제</h4>
+                        <p className="text-sm text-gray-600">현대카드 ZERO (**** 1234)</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 현금 결제 옵션 */}
+                  <div
+                    className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                      selectedPaymentMethod === 'CASH'
+                        ? 'border-red-500 bg-red-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setSelectedPaymentMethod('CASH')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        selectedPaymentMethod === 'CASH'
+                          ? 'border-red-500'
+                          : 'border-gray-300'
+                      }`}>
+                        {selectedPaymentMethod === 'CASH' && (
+                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold mb-1">현금 결제</h4>
+                        <p className="text-sm text-gray-600">만나서 지불하기</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setShowPaymentModal(false);
+                      setSelectedPaymentMethod(null);
+                    }}
+                    disabled={loading}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    className="flex-1 bg-red-600 hover:bg-red-700"
+                    onClick={handleProceedPayment}
+                    disabled={!selectedPaymentMethod || loading}
+                  >
+                    {loading ? '결제 중...' : '결제하기'}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

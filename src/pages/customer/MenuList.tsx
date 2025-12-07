@@ -10,6 +10,7 @@ import { Plus, Minus } from 'lucide-react';
 import { MenuService, type MenuReference, type DinnerType } from '../../services';
 import { toast } from 'sonner';
 import { extractShortageInfoFromError } from '../../utils/stockUtils';
+import { getDinnerImageSrc } from '../../utils/menuImages';
 
 // 로컬에서 사용할 MenuItem 인터페이스 (백엔드 DinnerType과 매핑)
 interface MenuItem {
@@ -29,27 +30,39 @@ interface MenuItem {
 }
 
 // 백엔드 DinnerType을 MenuItem으로 변환하는 함수
-const convertDinnerTypeToMenuItem = (dinnerType: DinnerType, servingStyles: string[]): MenuItem => {
+const convertDinnerTypeToMenuItem = (
+  dinnerType: DinnerType,
+  servingStyles: string[],
+  menuReference: MenuReference | null
+): MenuItem => {
   // 샴페인 축제 디너는 Simple 스타일 제외
   let availableStyles = servingStyles;
   if (dinnerType.description === '샴페인 축제 디너') {
     availableStyles = servingStyles.filter(style => style !== '심플');
   }
 
+  const imageSrc = getDinnerImageSrc(dinnerType.code, dinnerType.imageUrl || '/placeholder-menu-image.jpg');
+
   return {
     id: dinnerType.code,
     name: dinnerType.description,
     description: dinnerType.description,
     price: dinnerType.price,
-    image: dinnerType.imageUrl || '/placeholder-menu-image.jpg',
+    image: imageSrc,
     category: 'dinner',
     options: availableStyles,
-    components: dinnerType.recipe.map(comp => ({
-      name: comp.componentName,
-      defaultQuantity: comp.quantity,
-      price: 0, // 기본 레시피는 추가 요금 없음
-      maxQuantity: comp.quantity + 5 // 기본 수량 + 5개까지 추가 가능
-    }))
+    components: dinnerType.recipe.map(comp => {
+      // menuReference에서 해당 컴포넌트의 실제 가격 찾기
+      const componentType = menuReference?.componentTypes.find(ct => ct.code === comp.componentCode);
+      const componentPrice = componentType?.price || 0;
+
+      return {
+        name: comp.componentName,
+        defaultQuantity: comp.quantity,
+        price: componentPrice, // 실제 컴포넌트 가격 사용
+        maxQuantity: comp.quantity + 5 // 기본 수량 + 5개까지 추가 가능
+      };
+    })
   };
 };
 
@@ -149,7 +162,7 @@ export default function MenuList() {
 
         // DinnerType을 MenuItem으로 변환
         const convertedMenuItems = menuRef.dinnerTypes.map(dinnerType =>
-          convertDinnerTypeToMenuItem(dinnerType, servingStyleOptions)
+          convertDinnerTypeToMenuItem(dinnerType, servingStyleOptions, menuRef)
         );
 
         setMenuItems(convertedMenuItems);

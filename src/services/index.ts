@@ -6,9 +6,11 @@ export { default as OrderService } from './orderService';
 export { default as StaffService } from './staffService';
 export { default as AddressService } from './addressService';
 export { default as UserService } from './userService';
+export { VoiceService } from './voiceService';
 
 // API 클라이언트와 토큰 매니저
 export { apiClient, TokenManager } from './api';
 
 // 타입 정의들
 export * from './types';
+export * from './voiceService';

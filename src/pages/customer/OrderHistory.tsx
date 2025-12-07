@@ -187,13 +187,14 @@ const calculateReorderUnitPrice = (
 
 export default function OrderHistory() {
   const navigate = useNavigate();
-  const location = useLocation<{ highlightOrderId?: number }>();
+  const location = useLocation();
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
   const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
-  const highlightOrderId = location.state?.highlightOrderId;
+  const [reorderingOrderId, setReorderingOrderId] = useState<number | null>(null);
+  const highlightOrderId = (location.state as { highlightOrderId?: number })?.highlightOrderId;
   const { registerShortage } = useStock();
   const componentStockMap = useMemo(() => {
     if (!menuReference) {
@@ -322,10 +323,25 @@ export default function OrderHistory() {
     const usage: Record<string, number> = {};
     orderData.items?.forEach(item => {
       const multiplier = item.quantity ?? 1;
+
+      // 음식 재료 계산
       item.components?.forEach(comp => {
         const required = (comp.quantity ?? 0) * multiplier;
         usage[comp.componentCode] = (usage[comp.componentCode] || 0) + required;
       });
+
+      // ServingStyle의 tableware 계산
+      const servingStyleCode = typeof item.servingStyle === 'string'
+        ? item.servingStyle
+        : item.servingStyle;
+
+      const servingStyle = menuReference.servingStyles.find(ss => ss.code === servingStyleCode);
+      if (servingStyle && servingStyle.tableware) {
+        servingStyle.tableware.forEach(tableware => {
+          const required = (tableware.quantity ?? 0) * multiplier;
+          usage[tableware.componentCode] = (usage[tableware.componentCode] || 0) + required;
+        });
+      }
     });
 
     for (const [code, required] of Object.entries(usage)) {
@@ -356,7 +372,7 @@ export default function OrderHistory() {
     }
 
     try {
-      setLoading(true);
+      setReorderingOrderId(order.orderId);
       console.log('재주문 시작:', order);
       console.log('메뉴 참조 데이터:', menuReference);
 
@@ -379,7 +395,7 @@ export default function OrderHistory() {
 
         const diffModifications = buildDiffModifications(
           item.dinnerType,
-          componentModifications,
+          item.components,  // ✅ 원본 배열 데이터 사용
           menuReference
         );
 
@@ -434,7 +450,7 @@ export default function OrderHistory() {
       }
       toast.error(message);
     } finally {
-      setLoading(false);
+      setReorderingOrderId(null);
     }
   };
 
@@ -614,9 +630,9 @@ export default function OrderHistory() {
                     <Button
                       className="flex-1 bg-red-600 hover:bg-red-700"
                       onClick={() => handleReorder(order)}
-                      disabled={loading || !!shortageMessage}
+                      disabled={reorderingOrderId === order.orderId || !!shortageMessage}
                     >
-                      {shortageMessage || (loading ? '처리 중...' : '재주문')}
+                      {shortageMessage || (reorderingOrderId === order.orderId ? '처리 중...' : '재주문')}
                     </Button>
                   )}
                 </div>

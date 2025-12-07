@@ -1,4 +1,6 @@
+// 환경 변수에서 API URL 가져오기
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+console.log('🔧 API_BASE_URL:', API_BASE_URL);
 
 // API 응답 타입 정의
 export interface ApiResponse<T> {
@@ -12,7 +14,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public response?: any
+    public response?: unknown
   ) {
     super(message);
     this.name = 'ApiError';
@@ -51,13 +53,13 @@ class HttpClient {
     const url = `${this.baseURL}${endpoint}`;
     const token = TokenManager.getToken();
 
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const headers = new Headers(options.headers);
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
 
     if (token) {
-      headers.Authorization = `Bearer ${token}`;
+      headers.set('Authorization', `Bearer ${token}`);
       console.log(`API 요청 [${options.method || 'GET'}] ${endpoint} - 토큰 있음`);
     } else {
       console.log(`API 요청 [${options.method || 'GET'}] ${endpoint} - 토큰 없음`);
@@ -100,7 +102,7 @@ class HttpClient {
       }
 
       return await response.json();
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
       }
@@ -112,14 +114,14 @@ class HttpClient {
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  async put<T>(endpoint: string, data?: any): Promise<T> {
+  async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined,
@@ -130,7 +132,7 @@ class HttpClient {
     return this.request<T>(endpoint, { method: 'DELETE' });
   }
 
-  async patch<T>(endpoint: string, data?: any): Promise<T> {
+  async patch<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,

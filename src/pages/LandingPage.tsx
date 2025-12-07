@@ -11,6 +11,7 @@ import { OrderService, CartService, MenuService, type Order, type MenuReference 
 import { extractShortageInfoFromError } from '../utils/stockUtils';
 import { getComponentDisplayName } from '../utils/componentNames';
 import { toast } from 'sonner';
+import { getDinnerImageSrc } from '../utils/menuImages';
 import {
   Carousel,
   CarouselContent,
@@ -35,6 +36,8 @@ const getDinnerTypeName = (dinnerType: string): string => {
 const convertOrderToDisplay = (order: Order) => {
   const itemNames = order.items.map(item => getDinnerTypeName(item.dinnerType));
 
+  const primaryDinnerCode = order.items[0]?.dinnerType;
+
   return {
     id: order.orderId,
     originalOrder: order, // 재주문을 위한 원본 주문 데이터
@@ -45,7 +48,7 @@ const convertOrderToDisplay = (order: Order) => {
       day: '2-digit'
     }).replace(/\./g, '.'),
     price: `${order.totalPrice.toLocaleString()}원`,
-    image: '/placeholder-menu-image.jpg' // 실제 이미지 URL이 없으므로 플레이스홀더 사용
+    image: getDinnerImageSrc(primaryDinnerCode)
   };
 };
 

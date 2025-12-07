@@ -4,11 +4,12 @@ import { User, MapPin, CreditCard, History, Settings, Crown } from 'lucide-react
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { useAuth } from '../../contexts/AuthContext';
-import { OrderService, type Order } from '../../services';
+import { OrderService, AddressService } from '../../services';
 
 export default function MyPage() {
   const { user } = useAuth();
   const [orderCount, setOrderCount] = useState<number>(0);
+  const [defaultAddress, setDefaultAddress] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   // 주문 내역 로드하여 주문 횟수 계산
@@ -35,6 +36,33 @@ export default function MyPage() {
     };
 
     loadOrderCount();
+  }, [user]);
+
+  // 기본 배송지 로드
+  useEffect(() => {
+    const loadDefaultAddress = async () => {
+      if (!user) {
+        setDefaultAddress('');
+        return;
+      }
+
+      try {
+        const addresses = await AddressService.getAddresses();
+        const defaultAddr = addresses.find(addr => addr.isDefault);
+        if (defaultAddr) {
+          setDefaultAddress(defaultAddr.address);
+        } else {
+          // 기본 배송지가 없으면 회원가입 시 입력한 주소 사용
+          setDefaultAddress(user.address || '등록된 주소가 없습니다');
+        }
+      } catch (error) {
+        console.error('배송지 로드 실패:', error);
+        // 에러 발생 시 회원가입 시 입력한 주소 사용
+        setDefaultAddress(user.address || '등록된 주소가 없습니다');
+      }
+    };
+
+    loadDefaultAddress();
   }, [user]);
 
   // 회원 등급 계산 함수
@@ -87,8 +115,8 @@ export default function MyPage() {
                 <p>{user.phone || '등록된 전화번호가 없습니다'}</p>
               </div>
               <div>
-                <p className="text-gray-600 mb-1">주소</p>
-                <p>{user.address || '등록된 주소가 없습니다'}</p>
+                <p className="text-gray-600 mb-1">기본 배송지</p>
+                <p>{defaultAddress || '등록된 주소가 없습니다'}</p>
               </div>
             </div>
           </div>

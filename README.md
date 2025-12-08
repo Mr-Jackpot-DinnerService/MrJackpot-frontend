@@ -8,8 +8,8 @@ Mr.Jackpot 프로젝트의 프론트엔드 레포지토리입니다. React, Type
 
 ### 요구 사항 (Prerequisites)
 
-- [Node.js](https://nodejs.org/) (LTS 버전 권장)
-- npm (Node.js 설치 시 포함됨)
+- [react](https://ko.react.dev/) (LTS 버전 권장)
+- npm
 
 ### 설치 (Installation)
 

@@ -1,11 +1,15 @@
+import champFeastDinnerImg from '../assets/dinners/champ-feast-dinner.png';
+import englishDinnerImg from '../assets/dinners/english-dinner.png';
+import frenchDinnerImg from '../assets/dinners/french-dinner.png';
+import valentineDinnerImg from '../assets/dinners/valentine-dinner.png';
+
 const DEFAULT_PLACEHOLDER_IMAGE = '/placeholder-menu-image.jpg';
 
-// public 폴더의 이미지 사용 (Vite가 정적 자산으로 서빙)
 export const DINNER_TYPE_IMAGE_MAP: Record<string, string> = {
-  VALENTINE_DINNER: '/images/dinners/valentine-dinner.png',
-  FRENCH_DINNER: '/images/dinners/french-dinner.png',
-  ENGLISH_DINNER: '/images/dinners/english-dinner.png',
-  CHAMP_FEAST_DINNER: '/images/dinners/champ-feast-dinner.png',
+  VALENTINE_DINNER: valentineDinnerImg,
+  FRENCH_DINNER: frenchDinnerImg,
+  ENGLISH_DINNER: englishDinnerImg,
+  CHAMP_FEAST_DINNER: champFeastDinnerImg,
 };
 
 /**

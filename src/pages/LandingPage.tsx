@@ -7,7 +7,7 @@ import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
 import { Button } from '../components/ui/button';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { OrderService, CartService, MenuService, type Order, type MenuReference } from '../services';
+import { OrderService, CartService, MenuService, AddressService, type Order, type MenuReference } from '../services';
 import { extractShortageInfoFromError } from '../utils/stockUtils';
 import { getComponentDisplayName } from '../utils/componentNames';
 import { toast } from 'sonner';
@@ -147,6 +147,8 @@ export default function LandingPage() {
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
+  const [defaultAddress, setDefaultAddress] = useState<string | null>(null);
+  const [addressLoading, setAddressLoading] = useState(false);
 
   const componentStockMap = useMemo(() => {
     if (!menuReference) {
@@ -165,6 +167,45 @@ export default function LandingPage() {
       navigate('/staff/orders', { replace: true });
     }
   }, [user, loading, navigate]);
+
+  // 기본 주소 로드
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDefaultAddress = async () => {
+      if (!user || user.role !== 'CUSTOMER') {
+        if (isMounted) {
+          setDefaultAddress(null);
+        }
+        return;
+      }
+      try {
+        setAddressLoading(true);
+        const addresses = await AddressService.getAddresses();
+        if (!isMounted) {
+          return;
+        }
+        const defaultAddr = addresses.find(addr => addr.isDefault);
+        const fallbackAddr = defaultAddr?.address || addresses[0]?.address || null;
+        setDefaultAddress(fallbackAddr);
+      } catch (error) {
+        console.error('기본 주소 로드 실패:', error);
+        if (isMounted) {
+          setDefaultAddress(user.address || null);
+        }
+      } finally {
+        if (isMounted) {
+          setAddressLoading(false);
+        }
+      }
+    };
+
+    loadDefaultAddress();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   // 최근 주문 내역 로드
   useEffect(() => {
@@ -340,7 +381,11 @@ export default function LandingPage() {
             <div className="flex items-center justify-center gap-2 text-center text-gray-700">
               <MapPin className="h-4 w-4 text-red-600 flex-shrink-0" />
               <span>
-                {!user ? "로그인을 해 주세요." : (user.address || "기본 주소를 등록해 주세요.")}
+                {!user
+                  ? '로그인을 해 주세요.'
+                  : addressLoading
+                    ? '기본 주소를 불러오는 중...'
+                    : (defaultAddress || '기본 주소를 등록해 주세요.')}
               </span>
             </div>
           </button>

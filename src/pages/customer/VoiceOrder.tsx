@@ -1,12 +1,14 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Mic, MicOff, ShoppingCart } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
-import { VoiceService, type VoiceOrderResponse, CartService, MenuService } from '../../services';
+import { VoiceService, type VoiceOrderResponse, CartService, MenuService, type MenuReference } from '../../services';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { getComponentDisplayName } from '../../utils/componentNames';
+import { getDinnerImageSrc } from '../../utils/menuImages';
 
 interface MenuComponent {
   name: string;
@@ -25,67 +27,32 @@ interface MenuItem {
   components: MenuComponent[];
 }
 
-const menuItems: MenuItem[] = [
-  {
-    id: '1',
-    name: '발렌타인 디너',
-    description: '하트 모양과 큐피드 장식 접시에 와인과 스테이크 제공',
-    price: 80000,
-    image: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['심플 스타일', '그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '와인', defaultQuantity: 1, price: 15000 },
-      { name: '스테이크', defaultQuantity: 1, price: 35000 }
-    ]
-  },
-  {
-    id: '2',
-    name: '프렌치 디너',
-    description: '커피, 와인, 샐러드, 스테이크 제공',
-    price: 70000,
-    image: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['심플 스타일', '그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '커피', defaultQuantity: 1, price: 5000 },
-      { name: '와인', defaultQuantity: 1, price: 15000 },
-      { name: '샐러드', defaultQuantity: 1, price: 10000 },
-      { name: '스테이크', defaultQuantity: 1, price: 35000 }
-    ]
-  },
-  {
-    id: '3',
-    name: '잉글리시 디너',
-    description: '에그 스크램블, 베이컨, 빵, 스테이크 제공',
-    price: 60000,
-    image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['심플 스타일', '그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '에그 스크램블', defaultQuantity: 1, price: 8000 },
-      { name: '베이컨', defaultQuantity: 1, price: 7000 },
-      { name: '빵', defaultQuantity: 1, price: 5000 },
-      { name: '스테이크', defaultQuantity: 1, price: 35000 }
-    ]
-  },
-  {
-    id: '4',
-    name: '샴페인 축제 디너',
-    description: '2인 식사, 샴페인 1병, 바게트빵 4개, 커피 포트, 와인, 스테이크 제공',
-    price: 120000,
-    image: 'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=400&h=300&fit=crop',
-    category: 'dinner',
-    options: ['그랜드 스타일', '디럭스 스타일'],
-    components: [
-      { name: '샴페인', defaultQuantity: 1, price: 40000 },
-      { name: '바게트빵', defaultQuantity: 4, price: 3000 },
-      { name: '커피 포트', defaultQuantity: 1, price: 10000 },
-      { name: '와인', defaultQuantity: 1, price: 15000 },
-      { name: '스테이크', defaultQuantity: 2, price: 35000 }
-    ]
-  },
-];
+const dinnerTypeLabels: Record<string, string> = {
+  VALENTINE_DINNER: '발렌타인 디너',
+  FRENCH_DINNER: '프랑스식 디너',
+  ENGLISH_DINNER: '영국식 디너',
+  CHAMP_FEAST_DINNER: '샴페인 축제 디너'
+};
+
+const servingStyleLabels: Record<string, string> = {
+  SIMPLE: '심플',
+  GRAND: '그랜드',
+  DELUXE: '디럭스'
+};
+
+const getDinnerTypeLabel = (code?: string) => {
+  if (!code) {
+    return '';
+  }
+  return dinnerTypeLabels[code] || code;
+};
+
+const getServingStyleLabel = (code?: string) => {
+  if (!code) {
+    return '';
+  }
+  return servingStyleLabels[code] || code;
+};
 
 export default function VoiceOrder() {
   const { user } = useAuth();
@@ -95,11 +62,14 @@ export default function VoiceOrder() {
   const [aiMessages, setAiMessages] = useState<string[]>([]);
   const [orderSummary, setOrderSummary] = useState<VoiceOrderResponse['orderSummary'] | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [orderAddedToCart, setOrderAddedToCart] = useState(false);
+  const [menuReference, setMenuReference] = useState<MenuReference | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const aiMessagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     // 컴포넌트 언마운트 시 세션 종료 및 녹음 정리
@@ -115,6 +85,45 @@ export default function VoiceOrder() {
       }
     };
   }, [sessionId]);
+
+  useEffect(() => {
+    const loadMenuReference = async () => {
+      try {
+        const menuRef = await MenuService.getMenuReferences();
+        setMenuReference(menuRef);
+      } catch (error) {
+        console.error('메뉴 참조 데이터 로드 실패:', error);
+      }
+    };
+    loadMenuReference();
+  }, []);
+
+  const menuBoardItems = useMemo<MenuItem[]>(() => {
+    if (!menuReference) {
+      return [];
+    }
+    const servingOptions = menuReference.servingStyles.map(style => style.description);
+    return menuReference.dinnerTypes.map(dinner => ({
+      id: dinner.code,
+      name: dinner.description,
+      description: dinner.description,
+      price: dinner.price,
+      image: getDinnerImageSrc(dinner.code, dinner.imageUrl),
+      category: 'dinner',
+      options: servingOptions,
+      components: dinner.recipe.map(component => ({
+        name: component.componentName,
+        defaultQuantity: component.quantity,
+        price: 0,
+      })),
+    }));
+  }, [menuReference]);
+
+  useEffect(() => {
+    if (aiMessagesContainerRef.current) {
+      aiMessagesContainerRef.current.scrollTop = aiMessagesContainerRef.current.scrollHeight;
+    }
+  }, [aiMessages]);
 
   const startRecording = async () => {
     try {
@@ -244,13 +253,17 @@ export default function VoiceOrder() {
     // 주문 요약 정보 저장
     if (response.orderSummary) {
       setOrderSummary(response.orderSummary);
+      if (!response.orderSummary.confirmed) {
+        setOrderAddedToCart(false);
+      }
     }
 
     // 액션 처리
     if (response.actions && response.actions.length > 0) {
       response.actions.forEach(action => {
         if (action.type === 'PLACE_ORDER' && response.orderSummary?.confirmed) {
-          toast.success('주문이 확인되었습니다! 아래 "장바구니 가기" 버튼을 눌러주세요.');
+          toast.success('주문이 확인되었습니다! 아래 "장바구니 추가" 버튼을 눌러주세요.');
+          setOrderAddedToCart(false);
         }
       });
     }
@@ -267,6 +280,7 @@ export default function VoiceOrder() {
   const handleReset = () => {
     setAiMessages([]);
     setOrderSummary(null);
+    setOrderAddedToCart(false);
     if (sessionId) {
       VoiceService.endSession(sessionId).catch(console.error);
       setSessionId(null);
@@ -279,44 +293,70 @@ export default function VoiceOrder() {
       return;
     }
 
-    try {
-      // 메뉴 참조 정보 가져오기
-      const menuRef = await MenuService.getMenuReferences();
+    if (!menuReference) {
+      toast.error('메뉴 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
 
+    try {
       // dinnerType 찾기
-      const dinner = menuRef.dinnerTypes.find(d => d.code === orderSummary.dinnerType);
-      const serving = menuRef.servingStyles.find(s => s.code === orderSummary.servingStyle);
+      const dinner = menuReference.dinnerTypes.find(d => d.code === orderSummary.dinnerType);
+      const serving = menuReference.servingStyles.find(s => s.code === orderSummary.servingStyle);
 
       if (!dinner || !serving) {
         toast.error('메뉴 정보를 찾을 수 없습니다.');
         return;
       }
 
-      // 가격 계산
-      const basePrice = dinner.price + serving.extraPrice;
+      // 기본 레시피를 기준으로 컴포넌트 수량 구성
+      const defaultComponents = dinner.recipe.reduce<Record<string, number>>((acc, recipeItem) => {
+        acc[recipeItem.componentCode] = recipeItem.quantity;
+        return acc;
+      }, {});
+      const componentQuantities = { ...defaultComponents };
 
-      // 컴포넌트 수정사항 변환
-      const componentModifications: Record<string, number> = {};
+      // 요청된 구성(설명 기반)을 코드로 변환하여 덮어쓰기
       if (orderSummary.components) {
         Object.entries(orderSummary.components).forEach(([name, quantity]) => {
-          // 이름으로 컴포넌트 코드 찾기
-          const component = menuRef.componentTypes.find(c => c.description === name);
+          const component = menuReference.componentTypes.find(c => c.description === name);
           if (component) {
-            componentModifications[component.code] = quantity;
+            componentQuantities[component.code] = quantity;
           }
         });
       }
+
+      const modificationDiffs = Object.keys({
+        ...defaultComponents,
+        ...componentQuantities
+      }).reduce<Record<string, number>>((acc, code) => {
+        const actual = componentQuantities[code] ?? 0;
+        const base = defaultComponents[code] ?? 0;
+        const diff = actual - base;
+        if (diff !== 0) {
+          acc[code] = diff;
+        }
+        return acc;
+      }, {});
+
+      const calculatedPrice = MenuService.calculateTotalPrice(
+        orderSummary.dinnerType,
+        orderSummary.servingStyle,
+        1,
+        modificationDiffs,
+        menuReference
+      );
 
       // 장바구니에 추가
       await CartService.addToCart({
         dinnerType: orderSummary.dinnerType,
         servingStyle: orderSummary.servingStyle,
         quantity: 1,
-        componentModifications: Object.keys(componentModifications).length > 0 ? componentModifications : undefined,
-        calculatedPrice: basePrice
+        componentModifications: componentQuantities,
+        calculatedPrice
       });
 
       toast.success('장바구니에 추가되었습니다!');
+      setOrderAddedToCart(true);
       navigate('/customer/cart');
     } catch (error) {
       console.error('장바구니 추가 실패:', error);
@@ -371,7 +411,10 @@ export default function VoiceOrder() {
 
           {/* AI 응답 내역 */}
           {aiMessages.length > 0 && (
-            <div className="mt-6 bg-white rounded-lg p-4 border border-gray-200 shadow-sm max-h-64 overflow-y-auto">
+            <div
+              ref={aiMessagesContainerRef}
+              className="mt-6 bg-white rounded-lg p-4 border border-gray-200 shadow-sm max-h-64 overflow-y-auto"
+            >
               <p className="text-sm font-semibold text-gray-700 mb-3">AI 응답</p>
               <div className="space-y-2">
                 {aiMessages.map((message, index) => (
@@ -403,17 +446,19 @@ export default function VoiceOrder() {
                   <p>🎉 기념일: {orderSummary.occasionType}</p>
                 )}
                 {orderSummary.dinnerType && (
-                  <p>🍽️ 메뉴: {orderSummary.dinnerType}</p>
+                  <p>🍽️ 메뉴: {getDinnerTypeLabel(orderSummary.dinnerType)}</p>
                 )}
                 {orderSummary.servingStyle && (
-                  <p>✨ 스타일: {orderSummary.servingStyle}</p>
+                  <p>✨ 스타일: {getServingStyleLabel(orderSummary.servingStyle)}</p>
                 )}
                 {orderSummary.components && Object.keys(orderSummary.components).length > 0 && (
                   <div>
                     <p className="font-semibold mt-2">구성:</p>
                     <ul className="ml-4">
                       {Object.entries(orderSummary.components).map(([item, qty]) => (
-                        <li key={item}>• {item}: {qty}개</li>
+                        <li key={item}>
+                          • {getComponentDisplayName(item)}: {qty}개
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -425,14 +470,25 @@ export default function VoiceOrder() {
                   다시하기
                 </Button>
                 {orderSummary.confirmed && (
-                  <Button
-                    size="sm"
-                    className="bg-green-600 hover:bg-green-700"
-                    onClick={handleAddToCartAndNavigate}
-                  >
-                    <ShoppingCart className="w-4 h-4 mr-2" />
-                    장바구니 추가
-                  </Button>
+                  orderAddedToCart ? (
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700"
+                      onClick={() => navigate('/customer/cart')}
+                    >
+                      <ShoppingCart className="w-4 h-4 mr-2" />
+                      장바구니 가기
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700"
+                      onClick={handleAddToCartAndNavigate}
+                    >
+                      <ShoppingCart className="w-4 h-4 mr-2" />
+                      장바구니 추가
+                    </Button>
+                  )
                 )}
               </div>
             </div>
@@ -448,7 +504,7 @@ export default function VoiceOrder() {
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {menuItems.map(item => (
+          {menuBoardItems.map(item => (
             <div key={item.id} className="bg-white border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
               <ImageWithFallback
                 src={item.image}

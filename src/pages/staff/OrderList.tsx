@@ -61,6 +61,15 @@ const getComponentDisplayName = (componentCode: string): string => {
   return componentNames[componentCode] || componentCode;
 };
 
+const getDeliveryTypeLabel = (deliveryType: string | undefined) => {
+  const deliveryTypeMap: Record<string, string> = {
+    INSTANT: '즉시배달',
+    IMMEDIATE: '즉시배달',
+    RESERVATION: '예약배달',
+  };
+  return deliveryType ? deliveryTypeMap[deliveryType] || deliveryType : '배달 유형 미지정';
+};
+
 const statusText: Record<Order['status'], string> = {
   PAID_PENDING: '주문 접수 대기',
   ACCEPTED: '주문 접수',
@@ -194,7 +203,7 @@ export default function OrderList() {
                 <p className="text-sm text-gray-600">{order.receiverPhone}</p>
                 <p className="text-sm text-gray-600">{order.address}</p>
                 <Badge variant="outline" className="mt-2">
-                  {order.deliveryType === 'IMMEDIATE' ? '즉시배달' : '예약배달'}
+                  {getDeliveryTypeLabel(order.deliveryType)}
                 </Badge>
               </div>
 

@@ -10,6 +10,7 @@ export interface VoiceOrderRequest {
 // 주문 요약 정보
 export interface OrderSummary {
   occasionDate?: string;
+  occasionTime?: string;
   occasionType?: string;
   dinnerType?: string;
   servingStyle?: string;

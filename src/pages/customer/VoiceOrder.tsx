@@ -68,6 +68,13 @@ const getServingStyleLabel = (code?: string) => {
   return servingStyleLabels[code] || code;
 };
 
+const formatOccasionTime = (time?: string | null) => {
+  if (!time) {
+    return '';
+  }
+  return time.slice(0, 5);
+};
+
 export default function VoiceOrder() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -462,6 +469,9 @@ export default function VoiceOrder() {
               <div className="text-sm text-green-900 space-y-1">
                 {orderSummary.occasionDate && (
                   <p>📅 날짜: {orderSummary.occasionDate}</p>
+                )}
+                {orderSummary.occasionTime && (
+                  <p>🕒 시간: {formatOccasionTime(orderSummary.occasionTime)}</p>
                 )}
                 {orderSummary.occasionType && (
                   <p>🎉 기념일: {orderSummary.occasionType}</p>

@@ -31,7 +31,13 @@ const dinnerTypeLabels: Record<string, string> = {
   VALENTINE_DINNER: '발렌타인 디너',
   FRENCH_DINNER: '프랑스식 디너',
   ENGLISH_DINNER: '영국식 디너',
-  CHAMP_FEAST_DINNER: '샴페인 축제 디너'
+  CHAMP_FEAST_DINNER: '샴페인 축제 디너',
+  CHAMPAGNE_FEAST_DINNER: '샴페인 축제 디너'
+};
+
+// Voice backend still emits deprecated enum names for some dinners, normalize them here
+const dinnerTypeAliasMap: Record<string, string> = {
+  CHAMPAGNE_FEAST_DINNER: 'CHAMP_FEAST_DINNER'
 };
 
 const servingStyleLabels: Record<string, string> = {
@@ -40,11 +46,19 @@ const servingStyleLabels: Record<string, string> = {
   DELUXE: '디럭스'
 };
 
-const getDinnerTypeLabel = (code?: string) => {
+const normalizeDinnerTypeCode = (code?: string | null) => {
   if (!code) {
+    return undefined;
+  }
+  return dinnerTypeAliasMap[code] || code;
+};
+
+const getDinnerTypeLabel = (code?: string) => {
+  const normalizedCode = normalizeDinnerTypeCode(code);
+  if (!normalizedCode) {
     return '';
   }
-  return dinnerTypeLabels[code] || code;
+  return dinnerTypeLabels[normalizedCode] || normalizedCode;
 };
 
 const getServingStyleLabel = (code?: string) => {
@@ -250,10 +264,17 @@ export default function VoiceOrder() {
       setAiMessages(prev => [...prev, response.reply]);
     }
 
+    const normalizedSummary: VoiceOrderResponse['orderSummary'] | null = response.orderSummary
+      ? {
+          ...response.orderSummary,
+          dinnerType: normalizeDinnerTypeCode(response.orderSummary.dinnerType)
+        }
+      : null;
+
     // 주문 요약 정보 저장
-    if (response.orderSummary) {
-      setOrderSummary(response.orderSummary);
-      if (!response.orderSummary.confirmed) {
+    if (normalizedSummary) {
+      setOrderSummary(normalizedSummary);
+      if (!normalizedSummary.confirmed) {
         setOrderAddedToCart(false);
       }
     }
@@ -261,7 +282,7 @@ export default function VoiceOrder() {
     // 액션 처리
     if (response.actions && response.actions.length > 0) {
       response.actions.forEach(action => {
-        if (action.type === 'PLACE_ORDER' && response.orderSummary?.confirmed) {
+        if (action.type === 'PLACE_ORDER' && normalizedSummary?.confirmed) {
           toast.success('주문이 확인되었습니다! 아래 "장바구니 추가" 버튼을 눌러주세요.');
           setOrderAddedToCart(false);
         }

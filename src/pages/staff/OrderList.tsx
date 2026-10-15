@@ -231,7 +231,7 @@ export default function OrderList() {
                 </p>
               </div>
 
-              <div className="space-y-2">
+              <div className="mt-auto space-y-2">
                 <Select
                   value={order.status}
                   onValueChange={(value) =>

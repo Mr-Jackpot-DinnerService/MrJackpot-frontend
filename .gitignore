@@ -25,3 +25,6 @@ dist-ssr
 *.sw?server/
 
 .env
+
+# 백엔드 저장소 clone (별도 저장소)
+backend/
